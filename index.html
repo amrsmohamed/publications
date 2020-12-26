@@ -1,0 +1,2472 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+<title>JabRef references</title>
+<script src="Chart.js/dist/Chart.min.js"></script>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<script type="text/javascript">
+<!--
+// QuickSearch script for JabRef HTML export (no Abstract/BibTeX)
+// Version: 3.0
+//
+// Copyright (c) 2006-2011, Mark Schenk
+//
+// This software is distributed under a Creative Commons Attribution 3.0 License
+// http://creativecommons.org/licenses/by/3.0/
+//
+// Features:
+// - intuitive find-as-you-type searching
+//    ~ case insensitive
+//    ~ ignore diacritics (optional)
+//
+// - search with/without Regular Expressions
+// - match BibTeX key
+//
+
+// Search settings
+var noSquiggles = true; 	// ignore diacritics when searching
+var searchRegExp = false; 	// enable RegExp searches
+
+var color = Chart.helpers.color;
+var barChartData = {
+	labels: [],
+	datasets: [{
+		label: 'Journals',
+		backgroundColor: color('#CBF7B4').alpha(1).rgbString(),
+		borderColor: 'black',
+		borderWidth: 1,
+		barThickness: 11,  // number (pixels) or 'flex'
+		maxBarThickness: 12,
+		data: [	]
+	}, {
+		label: 'Conferences',
+		backgroundColor: color('#DDD0E8').alpha(1).rgbString(),
+		borderColor: 'black',
+		borderWidth: 1,
+		barThickness: 11,  // number (pixels) or 'flex'
+		maxBarThickness: 12,
+		data: [ ]
+	}, {
+		label: 'Other',
+		backgroundColor: color('#33FFC9').alpha(1).rgbString(),
+		borderColor: 'black',
+		borderWidth: 1,
+		barThickness: 11,  // number (pixels) or 'flex'
+		maxBarThickness: 12,
+		data: [	]
+	}]
+
+};
+
+
+if (window.addEventListener) {
+	window.addEventListener("load",initSearch,false); }
+else if (window.attachEvent) {
+	window.attachEvent("onload", initSearch); }
+
+function initSearch() {
+	// check for quick search table and searchfield
+	if (!document.getElementById('qs_table')||!document.getElementById('quicksearch')) { return; }
+
+	//initialize chart
+	var ctx = document.getElementById('canvas').getContext('2d');
+	ctx.height= 500;
+	//ctx.defaults.global.defaultFontColor='red';	
+	window.myBar = new Chart(ctx, {
+		type: 'bar',
+		data: barChartData,
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			legend: {
+				 position: 'top',
+				 labels: {
+                  fontColor: 'blue'
+                 }			
+			},
+			title: {
+				display: false,
+				//text: 'Chart.js Bar Chart'
+			}
+		}
+	});
+
+	// load all the rows and sort into arrays
+	loadTableData();
+	
+	//find the query field
+	qsfield = document.getElementById('qs_field');
+
+	// previous search term; used for speed optimisation
+	prevSearch = '';
+
+	//find statistics location
+	stats = document.getElementById('stat');
+	setStatistics(-1);
+
+	// set up preferences
+	initPreferences();
+
+	// shows the searchfield
+	document.getElementById('quicksearch').style.display = 'block';
+	document.getElementById('qs_field').onkeyup = quickSearch;
+}
+
+function addChartData(type, year) {
+	if(barChartData.labels.indexOf(year)<0) {
+		barChartData.labels.push(year);
+		var sortedlabels=barChartData.labels.map(function(value){return value;});
+		sortedlabels.sort();
+		//window.alert(sortedlabels);
+		barChartData.datasets.forEach(function(dataset) {
+			var sorteddataset=[];
+			sortedlabels.forEach(function(sortedlabel){
+				//window.alert(sortedlabel);
+				var sorteddata = dataset.data[barChartData.labels.indexOf(sortedlabel)]||0;
+				sorteddataset.push(sorteddata);
+			});
+			dataset.data=sorteddataset;
+		});
+		barChartData.labels=sortedlabels;
+		//window.alert(type);
+	}
+	//increment the publication type
+	barChartData.datasets.forEach(function(dataset) {
+		if(dataset.label.indexOf(type)>-1) {
+			dataset.data[barChartData.labels.indexOf(year)]++;
+		}
+	});
+	
+	window.myBar.update();
+		
+}
+
+function loadTableData() {
+	// find table and appropriate rows
+	searchTable = document.getElementById('qs_table');
+	var allRows = searchTable.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+
+	// split all rows into entryRows and infoRows (e.g. abstract, review, bibtex)
+	entryRows = new Array();
+
+	// get data from each row
+	entryRowsData = new Array();
+	
+	BibTeXKeys = new Array();
+	var journals= theses= books= patents= conferences=0;
+	for (var i=0, k=0, j=0; i<allRows.length;i++) {
+		if (allRows[i].className.match(/entry/)) {
+			entryRows[j] = allRows[i];
+			entryRowsData[j] = stripDiacritics(getTextContent(allRows[i]));
+			allRows[i].id ? BibTeXKeys[j] = allRows[i].id : allRows[i].id = 'autokey_'+j;
+			var Cells = entryRows[j].getElementsByTagName("td");
+			if(Cells[0].innerText.indexOf('Journal')>-1) {
+				entryRows[j].style.backgroundColor = "#CBF7B4";
+				journals++;
+				addChartData('Journal', Cells[3].innerText);
+			} 
+			else if(Cells[0].innerText.indexOf('Thesis')>-1) {
+				entryRows[j].style.backgroundColor = "#33FFC9";			
+				theses++;
+				addChartData('Other', Cells[3].innerText);								
+			}
+			else if(Cells[0].innerText.indexOf('Book')>-1) {
+				entryRows[j].style.backgroundColor = "#C0F8E9";			
+				books++;
+				addChartData('Other', Cells[3].innerText);												
+			}
+			else if(Cells[0].innerText.indexOf('Patent')>-1) {
+				entryRows[j].style.backgroundColor = "#E8D0E0";				
+				patents++;
+				addChartData('Other', Cells[3].innerText);												
+			}
+			else if(Cells[0].innerText.indexOf('Conference')>-1) {
+				entryRows[j].style.backgroundColor = "#DDD0E8";				
+				conferences++;
+				addChartData('Conference', Cells[3].innerText);				
+			}
+			Cells[0].innerText = j + 1 + ': ' + Cells[0].innerText;
+			j ++;
+		}
+	}
+
+	totalsTable = document.getElementById('totals_table');
+	var totalsRows = totalsTable.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+	if (totalsRows[1].className.match(/total/)) {
+		var Cells;
+		Cells = totalsRows[1].getElementsByTagName("td");
+		Cells[0].innerText= theses;
+		Cells[0].style.backgroundColor = "#33FFC9";
+		Cells[1].innerText= books;
+		Cells[1].style.backgroundColor = "#C0F8E9";
+		Cells[2].innerText= journals;
+		Cells[2].style.backgroundColor = "#CBF7B4";
+		Cells[3].innerText= patents;
+		Cells[3].style.backgroundColor = "#E8D0E0";
+		Cells[4].innerText= conferences;
+		Cells[4].style.backgroundColor = "#DDD0E8";
+		Cells[5].innerText= j;
+		//Cells[0].style.backgroundColor =
+	}
+	
+	//number of entries and rows
+	numEntries = entryRows.length;
+}
+
+function quickSearch(){
+	
+	tInput = qsfield;
+
+	if (tInput.value.length == 0) {
+		showAll();
+		setStatistics(-1);
+		qsfield.className = '';
+		return;
+	} else {
+		t = stripDiacritics(tInput.value);
+
+		if(!searchRegExp) { t = escapeRegExp(t); }
+			
+		// only search for valid RegExp
+		try {
+			textRegExp = new RegExp(t,"i");
+			qsfield.className = '';
+		}
+			catch(err) {
+			prevSearch = tInput.value;
+			qsfield.className = 'invalidsearch';
+			return;
+		}
+	}
+	
+	// count number of hits
+	var hits = 0;
+
+	// start looping through all entry rows
+	for (var i = 0; cRow = entryRows[i]; i++){
+
+		// only show search the cells if it isn't already hidden OR if the search term is getting shorter, then search all
+		if(cRow.className.indexOf('noshow')==-1 || tInput.value.length <= prevSearch.length){
+			var found = false; 
+
+			if (entryRowsData[i].search(textRegExp) != -1 || BibTeXKeys[i].search(textRegExp) != -1){ 
+				found = true;
+			}
+			
+			if (found){
+				cRow.className = 'entry show';
+				hits++;
+			} else {
+				cRow.className = 'entry noshow';
+			}
+		}
+	}
+
+	// update statistics
+	setStatistics(hits)
+	
+	// set previous search value
+	prevSearch = tInput.value;
+}
+
+
+// Strip Diacritics from text
+// http://stackoverflow.com/questions/990904/javascript-remove-accents-in-strings
+
+// String containing replacement characters for stripping accents 
+var stripstring = 
+    'AAAAAAACEEEEIIII'+
+    'DNOOOOO.OUUUUY..'+
+    'aaaaaaaceeeeiiii'+
+    'dnooooo.ouuuuy.y'+
+    'AaAaAaCcCcCcCcDd'+
+    'DdEeEeEeEeEeGgGg'+
+    'GgGgHhHhIiIiIiIi'+
+    'IiIiJjKkkLlLlLlL'+
+    'lJlNnNnNnnNnOoOo'+
+    'OoOoRrRrRrSsSsSs'+
+    'SsTtTtTtUuUuUuUu'+
+    'UuUuWwYyYZzZzZz.';
+
+function stripDiacritics(str){
+
+    if(noSquiggles==false){
+        return str;
+    }
+
+    var answer='';
+    for(var i=0;i<str.length;i++){
+        var ch=str[i];
+        var chindex=ch.charCodeAt(0)-192;   // Index of character code in the strip string
+        if(chindex>=0 && chindex<stripstring.length){
+            // Character is within our table, so we can strip the accent...
+            var outch=stripstring.charAt(chindex);
+            // ...unless it was shown as a '.'
+            if(outch!='.')ch=outch;
+        }
+        answer+=ch;
+    }
+    return answer;
+}
+
+// http://stackoverflow.com/questions/3446170/escape-string-for-use-in-javascript-regex
+// NOTE: must escape every \ in the export code because of the JabRef Export...
+function escapeRegExp(str) {
+  return str.replace(/[-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, "\\$&");
+}
+
+function setStatistics (hits) {
+	if(hits < 0) { hits=numEntries; }
+	if(stats) { stats.firstChild.data = hits + '/' + numEntries}
+}
+
+function getTextContent(node) {
+	// Function written by Arve Bersvendsen
+	// http://www.virtuelvis.com
+	
+	if (node.nodeType == 3) {
+	return node.nodeValue;
+	} // text node
+	if (node.nodeType == 1 && node.className != "infolinks") { // element node
+	var text = [];
+	for (var chld = node.firstChild;chld;chld=chld.nextSibling) {
+		text.push(getTextContent(chld));
+	}
+	return text.join("");
+	} return ""; // some other node, won't contain text nodes.
+}
+
+function showAll(){
+	for (var i = 0; i < numEntries; i++){ entryRows[i].className = 'entry show'; }
+}
+
+function clearQS() {
+	qsfield.value = '';
+	showAll();
+}
+
+function redoQS(){
+	showAll();
+	quickSearch(qsfield);
+}
+
+function updateSetting(obj){
+	var option = obj.id;
+	var checked = obj.value;
+
+	switch(option)
+	 {
+	 case "opt_useRegExp":
+	   searchRegExp=!searchRegExp;
+	   redoQS();
+	   break;
+	 case "opt_noAccents":
+	   noSquiggles=!noSquiggles;
+	   loadTableData();
+	   redoQS();
+	   break;
+	 }
+}
+
+function initPreferences(){
+	if(noSquiggles){document.getElementById("opt_noAccents").checked = true;}
+	if(searchRegExp){document.getElementById("opt_useRegExp").checked = true;}
+}
+
+function toggleSettings(){
+	var togglebutton = document.getElementById('showsettings');
+	var settings = document.getElementById('settings');
+	
+	if(settings.className == "hidden"){
+		settings.className = "show";
+		togglebutton.innerText = "close settings";
+		togglebutton.textContent = "close settings";
+	}else{
+		settings.className = "hidden";
+		togglebutton.innerText = "settings...";		
+		togglebutton.textContent = "settings...";
+	}
+}
+
+-->
+</script>
+<style type="text/css">
+body { background-color: white; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.2; padding: 1em; color: #2E2E2E; margin: auto 2em; }
+
+form#quicksearch { width: auto; border-style: solid; border-color: gray; border-width: 1px 0px; padding: 0.7em 0.5em; display:none; position:relative; }
+span#searchstat {padding-left: 1em;}
+
+div#settings { margin-top:0.7em; /* border-bottom: 1px transparent solid; background-color: #efefef; border: 1px grey solid; */ }
+div#settings ul {margin: 0; padding: 0; }
+div#settings li {margin: 0; padding: 0 1em 0 0; display: inline; list-style: none; }
+div#settings li + li { border-left: 2px #efefef solid; padding-left: 0.5em;}
+div#settings input { margin-bottom: 0px;}
+
+div#settings.hidden {display:none;}
+
+.column1 {
+  float: left;
+  width: 50%;
+  margin: 50px 50px;
+}
+
+.column2 {
+  float: right;
+  width: 50%;
+  height: 200px;
+  vertical-align: middle;
+  horizontal-align: middle;  
+}
+
+/* Clear floats after the columns */
+.row{
+  overflow: hidden;
+}
+#showsettings { border: 1px grey solid; padding: 0 0.5em; float:right; line-height: 1.6em; text-align: right; }
+#showsettings:hover { cursor: pointer; }
+
+.invalidsearch { background-color: red; }
+input[type="button"] { background-color: #efefef; border: 1px #2E2E2E solid;}
+
+table.publications { width: 100%; empty-cells: show; border-spacing: 0em 0.2em; margin: 1em 0em; border-style: none; }
+th, td { border: 1px gray solid; border-width: 1px 1px; padding: 0.5em; vertical-align: top; text-align: left; }
+th { background-color: #efefef; }
+td + td, th + th { border-left: none; }
+
+td a { color: navy; text-decoration: none; }
+td a:hover  { text-decoration: underline; }
+
+tr.noshow { display: none;}
+tr.highlight td { background-color: #EFEFEF; border-top: 2px #2E2E2E solid; font-weight: bold; }
+tr.abstract td, tr.review td, tr.bibtex td { background-color: #EFEFEF; text-align: justify; border-bottom: 2px #2E2E2E solid; }
+tr.nextshow td { border-bottom: 1px gray solid; }
+
+tr.bibtex pre { width: 100%; overflow: auto; white-space: pre-wrap;}
+p.infolinks { margin: 0.3em 0em 0em 0em; padding: 0px; }
+
+@media print {
+	p.infolinks, #qs_settings, #quicksearch, t.bibtex { display: none !important; }
+	tr { page-break-inside: avoid; }
+}
+
+canvas {
+	-moz-user-select: none;
+	-webkit-user-select: none;
+	-ms-user-select: none;
+}
+</style>
+</head>
+<body>
+<div class="row">
+<table class="column1" id="totals_table" style="border:1px solid black;margin-left:auto;margin-right:auto;font-style:italic;font-size:14pt;color:blue;" width="40%">
+<tr>
+	<td rowspan="2" width="5%">
+		<font size="4" color="red">Publications Summary</font>
+	</td>
+	<td width="5%">Theses</td>
+	<td width="5%">Books</td>
+	<td width="5%">Journals</td>
+	<td width="5%">Patents</td>
+	<td width="5%">Conferences</td>
+	<td width="5%">
+		<font size="4" color="red">Total</font>
+	</td>
+</tr>
+<tr id="totals" class="total">
+	<td>theses</td>
+	<td>books</td>
+	<td>journals</td>
+	<td>patents</td>
+	<td>conferences</td>
+	<td>j</td>
+</tr>
+</table>
+
+<div class="column2" id="container" style="width: 45%;">
+	<canvas id="canvas"></canvas>
+</div>
+</div>
+
+<form action="" id="quicksearch">
+<input type="text" id="qs_field" autocomplete="off" placeholder="Type to search..." /> <input type="button" onclick="clearQS()" value="clear" />
+<span id="searchstat">Matching entries: <span id="stat">0</span></span>
+<div id="showsettings" onclick="toggleSettings()">settings...</div>
+<div id="settings" class="hidden">
+<ul>
+<li><input type="checkbox" class="search_setting" id="opt_useRegExp" onchange="updateSetting(this)"><label for="opt_useRegExp"> use RegExp</label></li>
+<li><input type="checkbox" class="search_setting" id="opt_noAccents" onchange="updateSetting(this)"><label for="opt_noAccents"> ignore accents</label></li>
+</ul>
+</div>
+</form>
+<table id="qs_table" border="1" class="publications">
+<thead><tr><th width="10%">Reftype</th><th width="20%">Author</th><th width="30%">Title</th><th width="5%">Year</th><th width="30%">Journal/Proceedings</th><th width="5%">DOI/URL</th></tr></thead>
+<tbody><tr id="" class="entry">
+	<td>PhD Thesis</td>
+	<td>Mohamed, A.</td>
+	<td>Utility-based Resource and QoS Optimization in Wired and Wireless Networks</td>
+	<td>2006</td>
+	<td><i>School</i>: PhD thesis, UBC, Aug., 2006.&nbsp;</td>
+	<td><a href="https://circle.ubc.ca/handle/2429/18521">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Masters Thesis</td>
+	<td>Mohamed, A.</td>
+	<td>Novel Push-Model Framework For Realizing Multi-Service MPEG4 Streams In Broadcast Applications</td>
+	<td>2001</td>
+	<td><i>School</i>: M.A.Sc Thesis, UBC, Sept., 2001.&nbsp;</td>
+	<td><a href="https://circle.ubc.ca/handle/2429/12143">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book</td>
+	<td>Mohamed, A.</td>
+	<td>Energy Efficiency of Medical Devices and Healthcare Applications</td>
+	<td>2020</td>
+	<td><i>Publisher</i>: publisher Elsevier academic press, ISBN: 9780128190456, published date March 2020.&nbsp;</td>
+	<td><a href="https://www.elsevier.com/books/energy-efficiency-of-medical-devices-and-healthcare-applications/mohamed/978-0-12-819045-6">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book</td>
+	<td>Mohamed, A.</td>
+	<td>Utility-Based Resource and QoS Optimization in Packet Networks - Link and Network Level Optimization</td>
+	<td>2008</td>
+	<td><i>Publisher</i>: publisher VDM Verlag, ISBN: 978-3639044461, September 2008.&nbsp;</td>
+	<td><a href="http://www.amazon.ca/Utility-Based-Resource-Optimization-Packet-Networks/dp/3639044460/ref=sr_1_3?ie=UTF8&s=books&qid=1222145251&sr=1-3">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book Chapter</td>
+	<td>Rathore, H., Mohamed, A. and Guizani, M.</td>
+	<td>Blockchain applications for healthcare</td>
+	<td>2020</td>
+	<td><i>Publisher</i>: in book Energy Efficiency of Medical Devices and Healthcare Applications Elsevier academic press, March 2020.&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/B978012819045600008X">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book Chapter</td>
+	<td>Abdaoui, A., Al-Ali1, A., Riahi, A., Mohamed, A., Du, X. and Guizani, M.</td>
+	<td>Secure medical treatment with deep learning on embedded board</td>
+	<td>2020</td>
+	<td><i>Publisher</i>: in book Energy Efficiency of Medical Devices and Healthcare Applications Elsevier academic press, March 2020.&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/B9780128190456000078">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book Chapter</td>
+	<td>Rathore, H., Mohamed, A. and Guizani, M.</td>
+	<td>Deep learning-based security schemes for implantable medical devices</td>
+	<td>2020</td>
+	<td><i>Publisher</i>: in book Energy Efficiency of Medical Devices and Healthcare Applications Elsevier academic press, March 2020.&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/B9780128190456000066">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book Chapter</td>
+	<td>Abdellatif, A.A., Mohamed, A., Chiasserini, C.F., Erbad, A. and Guizani, M.</td>
+	<td>Edge computing for energy-efficient smart health systems: data and application-specific approaches</td>
+	<td>2020</td>
+	<td><i>Publisher</i>: in book Energy Efficiency of Medical Devices and Healthcare Applications Elsevier academic press, March 2020.&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/B9780128190456000030">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book Chapter</td>
+	<td>Al-Marridi, A., Mohamed, A. and Erbad, A.</td>
+	<td>AI-based techniques on edge devices to optimize energy efficiency in m-Health applications</td>
+	<td>2020</td>
+	<td><i>Publisher</i>: in book Energy Efficiency of Medical Devices and Healthcare Applications Elsevier academic press, March 2020.&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/B9780128190456000017">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book Chapter</td>
+	<td>Lateef, H.Y., Chiasserini, C.F., Mohamed, A. and Dohler, M.G.M.</td>
+	<td>Towards Energy-Aware 5G Cellular Networks</td>
+	<td>2015</td>
+	<td><i>Publisher</i>: in book Energy Management in Wireless Cellular and Ad-hoc Networks, Springer, 2015.&nbsp;</td>
+	<td><a href="http://link.springer.com/chapter/10.1007/978-3-319-27568-0_2">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Book Chapter</td>
+	<td>Butt, M.M., Krikidis, I., Mohamed, A. and Guizani, M.</td>
+	<td>RF Energy Harvesting Communications: Recent Advances and Research Issues</td>
+	<td>2015</td>
+	<td><i>Publisher</i>: in book Energy management in wireless cellular and ad-hoc networks, published by Springer and edited by M. Z. Shakir, M. A. Imran, K. A . Qaraqe, M. S. Alouni and A. Vasilakos, 2015.&nbsp;</td>
+	<td><a href="http://link.springer.com/chapter/10.1007/978-3-319-27568-0_15">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Singh, J., Bello, Y., Refaey, A., Erbad, A. and Mohamed, A.</td>
+	<td>Hierarchical Security Paradigm for IoT Multi-access Edge Computing</td>
+	<td>2020</td>
+	<td>published in IEEE Internet of Things Journal, 10.1109/JIOT.2020.3033265, October, 2020.&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/9237982">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Allahham, M.S., Abdellatif, A.A., Mohamed, A., Erbad, A., Yaacoub, E. and Guizani, M.</td>
+	<td>I-SEE: Intelligent, Secure and Energy-Efficient Techniques for Medical Data Transmission Using Deep Reinforcement Learning</td>
+	<td>2020</td>
+	<td>Published in IoT Journal, Early access, DOI: 10.1109/JIOT.2020.3027048, Sept, 2020. (IF: 9.936)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/9207771">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Chkirbene, Z., Erbad, A., Hamila, R., Gouissem, A., Mohamed, A. and Hamdi, M.</td>
+	<td>Machine Learning Based Cloud Computing Anomalies Detection</td>
+	<td>2020</td>
+	<td>published in IEEE Network Magazine, Volume: 34, Issue: 6, November 2020. (IF: 7.503)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/abstract/document/9183765">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Chkirbene, Z., Erbad, A., Hamila, R., Gouissem, A., Mohamed, A., Guizani, M. and Hamdi, M.</td>
+	<td>A Weighted Machine Learning-Based Attacks Classification to Alleviating Class Imbalance</td>
+	<td>2020</td>
+	<td>published in IEEE Systems Journal, November, 2020.&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/9257084">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Baccour, E., Erbad, A., Mohamed, A., Guizani, M. and Hamdi, M.</td>
+	<td>Collaborative hierarchical caching and transcoding in edge network with CE-D2D communication</td>
+	<td>2020</td>
+	<td>published in Journal of Network and Computer Applications, September, 2020. (IF: 5.570)&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/abs/pii/S1084804520302745">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Baccour, E., Erbad, A., Mohamed, A., Haouari, F., Guizani, M. and Hamdi, M.</td>
+	<td>RL-OPRA: Reinforcement Learning for Online and Proactive Resource Allocation of crowdsourced live videos</td>
+	<td>2020</td>
+	<td>published in Elsevier Future Generation Computer Systems, Vol 112, P 982-995, November 2020. (IF: 5.768)&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/abs/pii/S0167739X20306269">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Zahoor, K., Bilal, K., Erbad, A. and Mohamed, A.</td>
+	<td>Service-Less Video Multicast in 5G: Enablers and Challenges</td>
+	<td>2020</td>
+	<td>published in IEEE Network magazine, Volume: 34, Issue: 3, June 2020. (IF: 7.503)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/9105941">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Chkirbene, Z., Erbad, A., Hamila, R., Mohamed, A., Guizani, M. and Hamdi, M.</td>
+	<td>TIDCS: A Dynamic Intrusion Detection and Classification System Based Feature Selection</td>
+	<td>2020</td>
+	<td>in IEEE Access journal, Vol: 8, DOI: 10.1109/ACCESS.2020.2994931, May 2020. (IF: 3.745)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/9094213">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Mhaisen, N., Fetais, N., Erbad, A., Mohamed, A. and Guizani, M.</td>
+	<td>To chain or not to chain: A reinforcement learning approach for Blockchain-enabled IoT monitoring applications</td>
+	<td>2020</td>
+	<td>in Elsevier Future Generation Computer Systems, Vol: 111, p: 39-51, October 2020. (IF: 5.768)&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/abs/pii/S0167739X19334399">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Abdellatif, A.A., Al-Marridi, A.Z., Mohamed, A., Erbad, A., Chiasserini, C.F. and Refaey, A.</td>
+	<td>ssHealth: Toward Secure, Blockchain-Enabled Healthcare Systems</td>
+	<td>2020</td>
+	<td>in IEEE Network magazine (Early access), DOI: 10.1109/MNET.011.1900553, April 2020. (IF: 7.503)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/abstract/document/9076126">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Al-Garadi, M.A., Mohamed, A., Al-Ali, A., Du, X., Ali, I. and Guizani, M.</td>
+	<td>A Survey of Machine and Deep Learning Methods for Internet of Things (IoT) Security</td>
+	<td>2020</td>
+	<td>in IEEE Communications Surveys &amp; Tutorials journal, DOI: 10.1109/COMST.2020.2988293, Vol: 22 , Issue: 3 , August 2020. (IF: 23.7)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/9072101">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Baccour, E., Erbad, A., Bilal, K., Mohamed, A. and Guizani, M.</td>
+	<td>PCCP: Proactive Video Chunks Caching and Processing in Edge Networks</td>
+	<td>2020</td>
+	<td>published in Elsevier Future Generation Computer Systems, Vol 105, P 44-60, April 2020. (IF: 5.768)&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/S0167739X18331674">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Rathore, H., Mohamed, A. and Guizani, M.</td>
+	<td>A Survey of Blockchain Enabled Cyber-Physical Systems</td>
+	<td>2020</td>
+	<td>published in MDPI Sensors journal, January 2020. (IF: 3.031)&nbsp;</td>
+	<td><a href="https://www.mdpi.com/1424-8220/20/1/282">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Salama, A.M., Samy, I., Shafie, A.E., Mohamed, A. and Khattab, T.</td>
+	<td>Centralized and Distributed Cognitive Relay-Selection Schemes for SWIPT Cognitive Networks</td>
+	<td>2019</td>
+	<td>published in IEEE Transactions on Communications. Vol: 67, Issue: 11, PP. 7431 - 7443. 10.1109/TCOMM.2019.2936562, Nov 2019. (IF:5.69)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/8807261">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Shakeri, R., Al-Garadi, M.A., Badawy, A., Mohamed, A., Khattab, T., Al-Ali, A., Harras, K. and Guizani, M.</td>
+	<td>Design Challenges of Multi-UAV Systems in Cyber-Physical Applications: A Comprehensive Survey, and Future Directions</td>
+	<td>2019</td>
+	<td>published in IEEE Communications Surveys &amp; Tutorials journal, Vol: 21, Issue: 4, PP: 3340 – 3385, DOI: 10.1109/COMST.2019.2924143, June, 2019. (IF: 22.973)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/abstract/document/8742658">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Allahham, M.S., Al-Sa'd, M.F., Al-Ali, A., Mohamed, A., Khattab, T. and Erbad, A.</td>
+	<td>DroneRF dataset: A dataset of drones for RF-based detection, classification and identification</td>
+	<td>2019</td>
+	<td>published in Elsevier Data in Brief journal, ISSN: 2352-3409, Vol: 26, Page: 104313, August 2019.&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/S2352340919306675?via%3Dihub">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Al-Sa’d, M.F., Al-Ali, A., Mohamed, A., Khattab, T. and Erbad, A.</td>
+	<td>RF-based drone detection and identification using deep learning approaches: An initiative towards a large open source drone database</td>
+	<td>2019</td>
+	<td>published in Future Generation Computer Systems journal, Vol 100, Pages 86-97, May 2019. (IF: 5.768)&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/S0167739X18330760">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Saeed, A., ahmed Abdulkader, khan , M., Neishaboori, A. and a. Harras, K.</td>
+	<td>On Realistic Target Coverage by Autonomous Drones</td>
+	<td>2019</td>
+	<td>published in ACM transactions on sensor networks, Volume 15 Issue 3, August 2019.&nbsp;</td>
+	<td><a href="https://dl.acm.org/citation.cfm?id=3325512">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Bilal, K., Baccour, E., Erbad, A. and Mohamed, A.</td>
+	<td>Collaborative joint caching and transcoding in mobile edge networks</td>
+	<td>2019</td>
+	<td>accepted in the Elsevier Journal of Network and Computer Applications, March 2019. (IF: 5.273)&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/S1084804519300487">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Rathore, H., Al-ali, A., Mohamed, A. and Du, X.</td>
+	<td>A Novel Deep Learning Strategy for Classifying Different Attack Patterns for Deep Brain Implants</td>
+	<td>2019</td>
+	<td>IEEE Access journal, vol 7, P 24154 - 24164, February 2019. (IF: 4.098)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/8645788">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Belkhouja, T., Du, X., Mohamed, A., Al-Ali, A.K. and Guizani, M.</td>
+	<td>Biometric-based authentication scheme for Implantable Medical Devices during emergency situations</td>
+	<td>2019</td>
+	<td>published in Elsevier future generation computer systems, February 2019. (IF: 5.768)&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/S0167739X18325792">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Abdellatif, A.A., Mohamed, A., Chiasserini, C.F., Tlili, M. and Erbad, A.</td>
+	<td>Edge Computing for Smart Health: Context-aware Approaches, Opportunities, and Challenges</td>
+	<td>2019</td>
+	<td>published in IEEE Network Magazine, March 2019. (IF: 7.503)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/8674240">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Khandakar, A. and Mohamed, A.</td>
+	<td>Understanding Probabilistic Cognitive Relaying Communication with Experimental Implementation and Performance Analysis</td>
+	<td>2019</td>
+	<td>in MDPI sensors journal, special issue on Sustainable Internet of Things Empowered by Cognitive Radio Sensor Network, vol 19, issue 1, January 2019. (IF: 3.031)&nbsp;</td>
+	<td><a href="https://www.mdpi.com/1424-8220/19/1/179">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Rathore, H., Fu, C., Mohamed, A., Al-Ali, A., Du, X., Guizani, M. and Yu, Z.</td>
+	<td>Multi-layer security scheme for implantable medical devices</td>
+	<td>2018</td>
+	<td>published in Springer Neural Computing and Applications journal, October 2018. (IF: 4.664)&nbsp;</td>
+	<td><a href="https://link.springer.com/article/10.1007/s00521-018-3819-0">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Abdellatif, A.A., Emam, A., Chiasserini, C.-F., Mohamed, A., Jaoua, A. and Ward, R.</td>
+	<td>Edge-based Compression and Classification for Smart Healthcare Systems: Concept, Implementation and Evaluation, Expert Systems With Applications</td>
+	<td>2018</td>
+	<td>(2018), published in Elsevier expert systems with applications, doi: https://doi.org/10.1016/j.eswa.2018.09.019, September, 2018. (IF: 4.292)&nbsp;</td>
+	<td><a href="https://www.sciencedirect.com/science/article/pii/S0957417418305967">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Rathore, H., Wenzel, L., Al-Ali, A.K., Mohamed, A., Du, X. and Guizani, M.</td>
+	<td>Multi-Layer Perceptron Model on Chip for Secure Diabetic Treatment</td>
+	<td>2018</td>
+	<td>published in IEEE access journal, vol: 6, Pages: 44718 – 44730, July 2018. (IF: 4.098)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/8409455/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Said, A.B., Al-Sa'd, M.F., Tlili1, M., Abdellatif, A.A., Mohamed, A., Elfouly, T. and Harras, K.</td>
+	<td>A Deep Learning Approach for Vital Signs Compression and Energy Efficient Delivery in mHealth Systems</td>
+	<td>2018</td>
+	<td>published in IEEE access journal, vol: 6, Pages: 33727 – 33739, May 2018. (IF: 4.098)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/8372913/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Belkhouja, T, Du, X, Mohamed, A, Al-Ali, AK and Guizani, M.</td>
+	<td>Symmetric Encryption Relying on Chaotic Henon System for Secure Hardware-Friendly Wireless Communication of Implantable Medical Systems.</td>
+	<td>2018</td>
+	<td>MDPI Journal of Sensor and Actuator Networks; 7(2):21, May 2018.&nbsp;</td>
+	<td><a href="http://www.mdpi.com/2224-2708/7/2/21">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Abdellatif, A.A., Khafagy, M.G., Mohamed, A. and Chiasserini, C.-F.</td>
+	<td>EEG-based Transceiver Design with Data Decomposition for Healthcare IoT Applications</td>
+	<td>2018</td>
+	<td>Published in IEEE Internet of Things journal, Vol 5 , Issue 5, Oct 2018. (IF: 9.515)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/8353491/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Fahim, A., ElBatt, T., Mohamed, A. and Al-Ali, A.</td>
+	<td>Towards Extended Bit Tracking for Scalable and Robust RFID Tag Identification Systems</td>
+	<td>2018</td>
+	<td>Published in IEEE access journal, vol: 6, Pages: 27190 – 27204, May 2018. (IF: 4.098)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8353315">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Ghorbel, M.B., Hamdaoui, B., Guizani, M. and Mohamed, A.</td>
+	<td>Long-Term Power Procurement Scheduling Method for Smart-Grid Powered Communication Systems</td>
+	<td>2018</td>
+	<td>published in IEEE transactions on wireless communications, Vol: 17, Issue: 5, Pages: 2882 – 2892, February 2018. (IF: 6.394)&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/8302406/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Abdellatif, A.A. and Mohamed, A.</td>
+	<td>User-Centric Networks Selection with Adaptive Data Compression for Smart Health</td>
+	<td>2018</td>
+	<td>published in IEEE Systems journal, Issue 99, pages 1-12, Dec 2018. (IF: 4.463)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/8245779/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Khan, M., Heurtefeux, K., Mohamed, A., Harras, K.A. and Hassan, M.M.</td>
+	<td>Mobile Target Coverage &amp; Tracking on Drone-Be-Gone UAV Cyber Physical Testbed</td>
+	<td>2018</td>
+	<td>published in IEEE Systems journal, vol: 12, Issue 4, pages 3485 - 3496, Dec 2018. (IF: 4.463)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/8207649/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Arar, A., Mohamed, A., El-Sherif, A.A. and Leung, V.C.M.</td>
+	<td>Optimal Resource Allocation for Green and Clustered Video Sensor Networks</td>
+	<td>2018</td>
+	<td>published in IEEE Systems journal, vol 12, Issue 3, p 2117 - 2128, September 2018. (IF: 4.463)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/7737027/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Butt, M.M., Jorswieck, E.A. and Mohamed, A.</td>
+	<td>Energy and Bursty Packet Loss Tradeoff over Fading Channels: A System Level Model</td>
+	<td>2018</td>
+	<td>IEEE systems journal Volume: 12, Issue: 1, March 2018. (IF: 4.463)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/7446271/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Elgendi, M., Al-Ali, A., Mohamed, A. and Ward, R.</td>
+	<td>Improving Remote Health Monitoring: A Low-Complexity ECG Compression Approach</td>
+	<td>2018</td>
+	<td>published in MDPI diagnostics journal, January 2018. (IF:2.489)&nbsp;</td>
+	<td><a href="http://www.mdpi.com/2075-4418/8/1/10">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Hassan, M.M., Albakr, H., Al-Dossari, H. and Mohamed, A.</td>
+	<td>Resource Provisioning for Cloud-Assisted Body Area Network in a Smart Home Environment</td>
+	<td>2017</td>
+	<td>published in IEEE Access journal, vol 5, pages 13213-13224, DOI: 10.1109/ACCESS.2017.2726012, July 2017. (IF: 4.098)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/7974740/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Wu, L., Du, X. and Guizani, M.</td>
+	<td>Access Control Schemes for Implantable Medical Devices: A Survey</td>
+	<td>2017</td>
+	<td>published in IEEE internet of things journal, DOI: 10.1109/JIOT.2017.2708042, May, 2017. (IF: 9.515)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/7933942/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Badawy, A., Khattab, T., Trinchero, D., Elfouly, T.M. and Mohamed, A.</td>
+	<td>A Simple Cross Correlation Switched Beam System (XSBS) for Angle of Arrival estimation</td>
+	<td>2017</td>
+	<td>published in IEEE Access journal, vol 5, issue 1, p 3340-3352, February 2017. (IF: 4.098)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/7855653/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Elgendi, M., Mohamed, A., Lim, K.I. and Ward, R.</td>
+	<td>Efficient ECG Compression and QRS Detection for E-Health Applications</td>
+	<td>2017</td>
+	<td>Accepted in Nature scientific reports journal, February 2017. (IF: 5.22)&nbsp;</td>
+	<td><a href="https://www.ncbi.nlm.nih.gov/pubmed/28352071">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Badawy, A., Salman, T., Elfouly, T., Khattab, T., Mohamed, A. and Guizani, M.</td>
+	<td>Estimating the Number of Sources in White Gaussian Noise: Simple Eigenvalues Based Approaches</td>
+	<td>2017</td>
+	<td>IET Signal Processing journal, vol 11, issue 6, August, March 2017.&nbsp;</td>
+	<td><a href="http://digital-library.theiet.org/content/journals/10.1049/iet-spr.2016.0128">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Awad, A., Mohamed, A., Chiasserini, C.-F. and Elfouly, T.</td>
+	<td>Distributed in-network processing and resource optimization over mobile-health systems</td>
+	<td>2017</td>
+	<td>Elsevier Journal of Network and Computer Applications, Volume 82, 15, Pages 65–76, Jan 2017. (IF: 5.273)&nbsp;</td>
+	<td><a href="http://www.sciencedirect.com/science/article/pii/S108480451730022X">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Ashour, M., Butt, M.M., Mohamed, A., Elbatt, T. and Krunz, M.</td>
+	<td>Energy-Aware Cooperative Wireless Networks With Multiple Cognitive Users</td>
+	<td>2016</td>
+	<td>IEEE transactions on communications, Vol 64, Issue 8, P 3233 – 3245, August 2016. (IF: 5.69)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/7493693/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Awad, A., Mohamed, A. and Chiasserini, C.-F.</td>
+	<td>Dynamic Network Selection in Heterogeneous Wireless Networks: A user-centric scheme for improved delivery</td>
+	<td>2016</td>
+	<td>IEEE consumer electronics magazine, Volume: 6, Issue: 1, December 2016. (IF: 3.273)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/7786944/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Badawy, A., Khattab, T.M.E.T., Mohamed, A. and Guizani, M.</td>
+	<td>Unleashing the secure potential of the wireless physical layer: Secret key generation methods</td>
+	<td>2016</td>
+	<td>Physical Communication Journal, Volume 19, pages 1 – 10, June 2016. (DOI: 10.1016/j.phycom.2015.11.005).&nbsp;</td>
+	<td><a href="http://www.sciencedirect.com/science/article/pii/S1874490715000713">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Badawy, A., Elfouly, T., Khattab, T., Chiasserini, C.-F., Mohamed, A. and Trinchero, D.</td>
+	<td>Robust secret key extraction from channel secondary random process</td>
+	<td>2016</td>
+	<td>Published in Wiley communications and mobile computing journal, Volume 16, Issue 11, Pages 1389–1400, August 2016.&nbsp;</td>
+	<td><a href="http://onlinelibrary.wiley.com/doi/10.1002/wcm.2695/abstract">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Butt, M.M. and Salama, A.M.</td>
+	<td>Relay Selection to Minimize Outage in Wireless Powered Communication Networks</td>
+	<td>2016</td>
+	<td>published in IET Signal processing journal, special issue on signal processing in large scale 5G wireless networks, April, 2016.&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/document/7458254/">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Hajipour, J., Ruby, R., Mohamed, A. and Leung, V.</td>
+	<td>Buffer-aided relaying improves both throughput and end-to-end delay</td>
+	<td>2015</td>
+	<td>published in EURASIP journal on wireless communications and networking, December 2015.&nbsp;</td>
+	<td><a href="http://www.jwcn.eurasipjournals.com/content/2015/1/261">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Hajipour, J., Mohamed, A. and Leung, V.</td>
+	<td>Utility-based efficient dynamic-distributed resource allocation in buffer-aided relay-assisted OFDMA networks</td>
+	<td>2015</td>
+	<td>published in EURASIP journal on wireless communications and networking, December 2015.&nbsp;</td>
+	<td><a href="http://jwcn.eurasipjournals.springeropen.com/articles/10.1186/s13638-015-0481-4">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Ashour, M., El-Sherif, A.A., ElBatt, T. and Mohamed, A.</td>
+	<td>Cognitive Radio Networks with Probabilistic Relaying: Stable Throughput and Delay Tradeoffs</td>
+	<td>2015</td>
+	<td>published in IEEE Transactions on communications, August 2015. (IF: 5.69)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/xpl/login.jsp?tp=&arnumber=7219395&url=http%3A%2F%2Fieeexplore.ieee.org%2Fxpls%2Fabs_all.jsp%3Farnumber%3D7219395">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Ahmed, I., Butt, M.M., Psomas, C., Mohamed, A., Krikidis, I. and Guizani, M.</td>
+	<td>Survey on energy harvesting wireless communications: Challenges and opportunities for radio resource allocation</td>
+	<td>2015</td>
+	<td>published in Elsevier computer networks journal, Volume 88, Pages 234–248, September 2015.&nbsp;</td>
+	<td><a href="http://www.sciencedirect.com/science/article/pii/S1389128615002029">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Sarif, B.A., Pourazad, M.T., Nasiopoulos, P., Leung, V.C. and Mohamed, A.</td>
+	<td>Fairness scheme for energy efficient H.264/AVC-based video sensor network</td>
+	<td>2015</td>
+	<td>published in Springer Human-centric Computing and Information Sciences journal, March 2015.&nbsp;</td>
+	<td><a href="http://link.springer.com/article/10.1186%2Fs13673-015-0025-2">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Hajipour, J. and Mohamed, A.</td>
+	<td>Channel-, Queue-, and Delay-Aware Resource Allocation in Buffer-Aided Relay-Enhanced OFDMA Networks</td>
+	<td>2015</td>
+	<td>accepted in IEEE Transactions on Vehicular Technology (IEEE TVT), April 2015. (IF: 5.339)&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/xpl/login.jsp?tp=&arnumber=7089291&url=http%3A%2F%2Fieeexplore.ieee.org%2Fiel7%2F25%2F4356907%2F07089291.pdf%3Farnumber%3D7089291">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Ahmed, I. and Mohamed, A.</td>
+	<td>Power control and group proportional fairness for frequency domain resource allocation in L-SC-FDMA based LTE uplink</td>
+	<td>2015</td>
+	<td>published in Springer wireless networks journal, volume 21, issue 6, pp 1819-1834, August 2015.&nbsp;</td>
+	<td><a href="http://link.springer.com/article/10.1007%2Fs11276-014-0845-4">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Hussein, R., Mohamed, A. and Alghoniemy, M.</td>
+	<td>Scalable real-time energy-efficient EEG compression scheme for wireless body area sensor network</td>
+	<td>2015</td>
+	<td>published in Elsevier Biomedical signal processing and control journal, vol 19, pages 122–129, May 2015.&nbsp;</td>
+	<td><a href="http://www.sciencedirect.com/science/article/pii/S1746809415000415">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Awad, A., Mohamed, A., El-Sherif, A.A. and Nasr, O.A.</td>
+	<td>Interference-Aware Energy-Efficient Cross-Layer Design for Healthcare Monitoring Applications</td>
+	<td>2014</td>
+	<td>Published in Elsevier journal of Computer Networks, VOL. 74, pp. 64–77, December 2014.&nbsp;</td>
+	<td><a href="http://www.sciencedirect.com/science/article/pii/S1389128614003119">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Elsherif, A. and Mohamed, A.</td>
+	<td>Decentralized Throughput Maximization in Cognitive Radio Wireless Mesh Networks</td>
+	<td>2014</td>
+	<td>Published in IEEE Transactions on Mobile Computing ISSN: 1536-1233, DOI: 10.1109/TMC.2013.82, issue: 99, February 2014.&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=6746172">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Elsherif, A. and Mohamed, A.</td>
+	<td>Joint Routing and Resource Allocation for Delay Minimization in Cognitive Radio Based Mesh Networks</td>
+	<td>2013</td>
+	<td>published in IEEE Transactions on Wireless Communications, ISSN:1536-1276 DOI: 10.1109/TWC.2013.112513.122082, volume 13, issue 1, pages: 186 – 197, December 2013.&nbsp;</td>
+	<td><a href="https://ieeexplore.ieee.org/document/6678094">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Ahmed, I. and Mohamed, A.</td>
+	<td>Hybrid Radio Resource Allocation and Interference Coordination for Type 1a-relayed LTE Uplink</td>
+	<td>2014</td>
+	<td>published in IET communications journal ISSN: 1751-8628, vol: 8, issue: 11, July 2014.&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/xpl/login.jsp?tp=&arnumber=6855940&url=http%3A%2F%2Fieeexplore.ieee.org%2Fiel7%2F4105970%2F6855933%2F06855940.pdf%3Farnumber%3D6855940">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Saad, H., Mohamed, A. and ElBatt, T.</td>
+	<td>Cooperative Q-learning techniques for distributed online power allocation in femtocell networks</td>
+	<td>2014</td>
+	<td>in Wiley Wireless Communications and Mobile Computing journal ISSN:1530-8669, DOI: 10.1002/wcm.2470, February 2014.&nbsp;</td>
+	<td><a href="http://onlinelibrary.wiley.com/doi/10.1002/wcm.2470/abstract">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Mohamed, A., Shaban, K.B. and Mohamed, A.</td>
+	<td>Evidence-Based Combination of Weighted Classifiers Approach for Epileptic Seizure Detection using EEG Signals</td>
+	<td>2013</td>
+	<td>International Journal of Knowledge Discovery in Bioinformatics (IJKDB), Vol. 3, No. 2, Pages 27-44, April-June 2013.&nbsp;</td>
+	<td><a href="http://www.igi-global.com/article/evidence-based-combination-weighted-classifiers/77929">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Ahmed, I., Mohamed, A. and Alnuweiri, H.</td>
+	<td>On the fairness of resource allocation in wireless mesh networks: a survey</td>
+	<td>2013</td>
+	<td>Published in Springer Wireless Networks journal ISSN:1022-0038, DOI: 10.1007/s11276-013-0544-6, volume 19 issue 6, pages 1451-1468, August 2013.&nbsp;</td>
+	<td><a href="http://link.springer.com/article/10.1007%2Fs11276-013-0544-6#page-1">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Hamza, F.A., Romdhani, L. and Mohamed, A.</td>
+	<td>New Inter-Layer Network Coding Approaches for MRC Video Delivery over Mesh Networks</td>
+	<td>2012</td>
+	<td>International Journal of Computer Science and Management Research, volume 1, issue 3, October 2012.&nbsp;</td>
+	<td><a href="http://www.ijcsmr.org/vol1issue3/paper81.pdf">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Romdhani, L. and Mohamed, A.</td>
+	<td>Deploying and Configuring Wireless Mesh Network in Coexistence of Highly Interfering Wireless LANs</td>
+	<td>2012</td>
+	<td>Journal of Telecommunications, Volume 14, issue 2, June 2012.&nbsp;</td>
+	<td><a href="http://www.scribd.com/doc/105682010/Deploying-and-Configuring-Wireless-Mesh-Network-in-Coexistence-of-Highly-Interfering-Wireless-LANs">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Al-sand, K.A., Mahmuddin, M. and Mohamed, A.</td>
+	<td>Wireless body area sensor networks signal processing and communication framework: survey on sensing, communication technologies, delivery and feedback</td>
+	<td>2012</td>
+	<td>journal of computer science ISSN: 1549-3636, Volume: 8 Issue: 1, Jan, 2012.&nbsp;</td>
+	<td><a href="http://www.thescipub.com/abstract/10.3844/jcssp.2012.121.132">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Ahmed, I. and Mohamed, A.</td>
+	<td>Fairness Aware Group Proportional Frequency Domain Resource Allocation in L-SC-FDMA Based Uplink</td>
+	<td>2011</td>
+	<td>International Journal of Communications, Network and System Sciences, DOI: 10.4236/ijcns.2011.48060, PP.487-494, Vol.4 No.8, August 2011.&nbsp;</td>
+	<td><a href="http://www.scirp.org/journal/PaperInformation.aspx?paperID=6918#.Uv26zLTjtOI">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Qaffaf, S.J., Al-kuwari, R., Al-amoudi, O., Al-Oraidi, N., Dawood, H., Al-Marri, M., El-Fouly, T. and Mohamed, A.</td>
+	<td>Assistive Technology for People with Hearing/Speaking Disabilities</td>
+	<td>2011</td>
+	<td>IEEE Multidisciplinary Engineering Education Magazine, Vol 6, No 4, 2011.&nbsp;</td>
+	<td><a href="https://docuri.com/download/dis_59a8d825f581719e12ae2e8d_pdf">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Hamza, F.A. and Mohamed, A.</td>
+	<td>Performance Comparison Between Dynamic Routing Protocols RIP and OSPF using NS2</td>
+	<td>2011</td>
+	<td>Journal of Emerging Trends in Computing and Information Sciences, ISSN:2079-8407, PP:509-513, Vol 2, Issue 10, Oct., 2011.&nbsp;</td>
+	<td><a href="http://www.cisjournal.org/journalofcomputing/archive/vol2no10/vol2no10_6.pdf">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Wireless multicast cross-layer framework for rate allocation: protocol design</td>
+	<td>2009</td>
+	<td>International Journal of Internet Protocol Technology Vol. 4, No.1 pp. 44 – 53, 2009 (Invited paper).&nbsp;</td>
+	<td><a href="http://dl.acm.org/citation.cfm?id=1521375">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Kaheel, A., Khattab, T., Mohamed, A. and Alnuweiri, H.</td>
+	<td>Quality-of-service mechanisms in IP-over-WDM networks</td>
+	<td>2002</td>
+	<td>IEEE Communications Magazine, 40(12):38–44, December 2002.&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/xpls/abs_all.jsp?arnumber=1106157&tag=1">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Cross-Layer Optimal Rate Allocation for Heterogeneous Wireless Multicast</td>
+	<td>2009</td>
+	<td>EURASIP Journal on Wireless Communications and Networking January, 2009.&nbsp;</td>
+	<td><a href="http://downloads.hindawi.com/journals/wcn/2009/467182.pdf">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Cross-layer distributed approach for optimal rate allocation for homogeneous wireless multicast</td>
+	<td>2007</td>
+	<td>IET communications journal, special Issue on Wireless Mobile Networks: Cross-Layer Communication, April 2007.&nbsp;</td>
+	<td><a href="http://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=4375486">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Journal</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Dynamic programming QoS-based classification for links with limited service levels</td>
+	<td>2005</td>
+	<td>International Transactions on Computer Science and Engineering (GESTS), 19(1):97–108, October 2005.&nbsp;</td>
+	<td><a href="http://www.gests.org/down/2410.pdf">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Patent</td>
+	<td>Baccour, E., Haouari, F., Erbad, A., Mohamed, A. and Guizani, M.</td>
+	<td>Transcoding Resources Forecasting and Reservation for Crowdsourced Live Streaming</td>
+	<td>2019</td>
+	<td>provisional 2019-049-01, full patent under filing, 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Patent</td>
+	<td>Zahoor, K., Bilal, K., Erbad, A., Mohamed, A. and Guizani, M.</td>
+	<td>Method and system for Service-less Live Video Multicast using Edge Network Architecture</td>
+	<td>2019</td>
+	<td>Provisional 2019-038-01, US, 62/877,136, full patent under filing, May 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Patent</td>
+	<td>Zahoor, K., Bilal, K., Erbad, A., Mohamed, A. and Guizani, M.</td>
+	<td>Method and system for Service-less Live Video Multicast using Edge Network Architecture</td>
+	<td>2019</td>
+	<td>Provisional 2019-038-01, US, 62/877,136, full patent under filing, May 2019.&nbsp;</td>
+	<td><a href="https://patents.google.com/patent/US10826535B2/en">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Patent</td>
+	<td>Khattab, T., Mohamed, A., Abu-Dayya, A., Uthman, B. and Streletz., L.</td>
+	<td>System for non-invasive automated monitoring detection analysis characterization prediction or prevention of seizures and movement disorder symptoms</td>
+	<td>2017</td>
+	<td>European patent application no EP20100006537, publication date Jan 4th, 2017.&nbsp;</td>
+	<td><a href="https://www.google.com/patents/EP2399513B1?cl=un">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Patent</td>
+	<td>Badawy, A., Khattab, T. and Trinchero, D.</td>
+	<td>Method and Apparatus for Accurate Low Complexity Direction of Arrival (DoA) Estimation of Wireless Radio Frequency Signals</td>
+	<td>2019</td>
+	<td>US provisional Patent Application No 62/219,617 filed on September 16, 2015. Full Patent application is filed in June 2016, granted in Aug 2019.&nbsp;</td>
+	<td><a href="http://www.google.com/patents/US20170074962">URL</a>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Patent</td>
+	<td>Badawy, A., Khattab, T., Elfouly, T. and Chiasserini, C.</td>
+	<td>Method and System for Robust Secret Key Extraction from Wireless Link Signature</td>
+	<td>2017</td>
+	<td>United States Patent Application 20170338956, May 2017.&nbsp;</td>
+	<td><a href="http://www.freepatentsonline.com/y2017/0338956.html">URL</a>&nbsp;</td>
+</tr>
+<tr id="Sing2008:Navigation" class="entry">
+	<td>Conference</td>
+	<td>Singh, J., Refaey, A., Erbad, A., Mohamed, A. and Guizani, M.</td>
+	<td>Navigation and Obstacle Avoidance System in Unknown Environment</td>
+	<td>2020</td>
+	<td>2020 IEEE Canadian Conference on Electrical and Computer Engineering (CCECE) (IEEE CCECE 2020)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Elsa2008:Deep" class="entry">
+	<td>Conference</td>
+	<td>Elsayed, M., Badawy, A., El Shafie, A., Mohamed, A. and Khattab, T.</td>
+	<td>Deep Reinforcement Learning Algorithm for Smart Data Compression Under NOMA Uplink Protocol</td>
+	<td>2020</td>
+	<td>2020 IEEE Canadian Conference on Electrical and Computer Engineering (CCECE) (IEEE CCECE 2020)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Chki2012:Energy" class="entry">
+	<td>Conference</td>
+	<td>Chkirbene, Z., Mohamed, A., Erbad, A. and Guizani, M.</td>
+	<td>Energy-Efficient Networks Selection Based Deep Reinforcement Learning for Heterogeneous Health Systems</td>
+	<td>2020</td>
+	<td>2020 IEEE International Conference on E-health Networking, Application &amp; Services (HEALTHCOM) (IEEE Healthcom 2020)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Chki2006:Smart" class="entry">
+	<td>Conference</td>
+	<td>Chkirbene, Z., Mohamed, A., Erbad, A. and Guizani, M.</td>
+	<td>Smart Edge Healthcare Data Sharing System</td>
+	<td>2020</td>
+	<td>IWCMC 2020: e-Health Symposium (IWCMC 2020 e-Health Symposium)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Chki2006:Iterative" class="entry">
+	<td>Conference</td>
+	<td>Chkirbene, Z., Erbad, A., Hamila, R., Mohamed, A., Guizani, M. and Hamdi, M.</td>
+	<td>Iterative Per Group Feature Selection For Intrusion Detection</td>
+	<td>2020</td>
+	<td>IWCMC 2020 Security Symposium (IWCMC 2020 Security Symp)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Chki2006:EEG" class="entry">
+	<td>Conference</td>
+	<td>Chkirbene, Z., AlMarridi, A., Abdellatif, A.A., Mohamed, A., Erbad, A., OConnor, M., Laughton, J., Villacorte, A. and Menez, J.</td>
+	<td>EEG-based Analysis Study for Patients Receiving Intravenous Antibiotic Medication</td>
+	<td>2020</td>
+	<td>2020 International Wireless Communications and Mobile Computing (IWCMC) (IWCMC 2020)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Basy2010:Proportionally" class="entry">
+	<td>Conference</td>
+	<td>Basyoni, L., Erbad, A., Mohamed, A., Refaey, A. and Guizani, M.</td>
+	<td>Proportionally Fair approach for Tor's Circuits Scheduling</td>
+	<td>2020</td>
+	<td>2020 International Symposium on Networks, Computers and Communications (ISNCC) (ISNCC-2020)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Bacc2012:DistPrivacy" class="entry">
+	<td>Conference</td>
+	<td>Baccour, E., Erbad, A., Mohamed, A., Hamdi, M. and Guizani, M.</td>
+	<td>DistPrivacy: Privacy-Aware Distributed Deep Neural Networks in IoT surveillance systems</td>
+	<td>2020</td>
+	<td>2020 IEEE Global Communications Conference: Selected Areas in Communications: Internet of Things and Smart Connected Communities (Globecom2020 SAC IoTSCC)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Bacc2006:CE" class="entry">
+	<td>Conference</td>
+	<td>Baccour, E., Erbad, A., Mohamed, A., Guizani, M. and Hamdi, M.</td>
+	<td>CE-D2D: Collaborative and Popularity-aware Proactive Chunks Caching in Edge Networks</td>
+	<td>2020</td>
+	<td>IWCMC 2020 - Mobile Computing (IWCMC 2020 Mobile Computing)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="AlMa2009:Optimizing" class="entry">
+	<td>Conference</td>
+	<td>AlMarridi, A., Kharbach, S., Yaacoub, E. and Mohamed, A.</td>
+	<td>Optimizing Energy-Distortion Trade-off for Vital Signs Delivery in Mobile Health Applications</td>
+	<td>2020</td>
+	<td>2020 IEEE 3rd 5G World Forum (5GWF) (5G-WF'20)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="AlAl2012:Dynamic" class="entry">
+	<td>Conference</td>
+	<td>Al-Ali, M., Yaacoub, E. and Mohamed, A.</td>
+	<td>Dynamic Resource Allocation of eMBB-uRLLC Traffic in 5G New Radio</td>
+	<td>2020</td>
+	<td>2020 IEEE International Conference on Advanced Networks and Telecommunications Systems (ANTS) (ANTS'20)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="Moha2006:Blockchain" class="entry">
+	<td>Conference</td>
+	<td>Ait oualhaj, O., Mohamed, A., Erbad, A. and Guizani, M.</td>
+	<td>Blockchain based decentralized Trust Management framework</td>
+	<td>2020</td>
+	<td>2020 International Wireless Communications and Mobile Computing (IWCMC) (IWCMC 2020)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Shalaby, S., Abdellatif, A.A., Mohamed, A., Erbad, A. and Guizani, M.</td>
+	<td>Performance Evaluation of Hyperledger Fabric</td>
+	<td>2020</td>
+	<td>accepted in ICIoT 2020, February 2020&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Allahham, M.S., Khattab, T. and Mohamed, A.</td>
+	<td>Deep Learning for RF-Based Drone Detection and Identification: A Multi-Channel 1-D Convolutional Neural Networks Approach</td>
+	<td>2020</td>
+	<td>accepted in ICIoT 2020, February 2020&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Al-sahan, L., Al-jabiri, F., Abdelsalam, N., Mohamed, A. and Elfouly, T.</td>
+	<td>Public Security Surveillance System Using Blockchain Technology and Advanced Image Processing Techniques</td>
+	<td>2020</td>
+	<td>accepted in ICIoT 2020, February 2020&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Baccour, E., Erbad, A., Bilal, K., Mohamed, A. and Hamdi, M.G.M.</td>
+	<td>FacebookVideoLive18: A Live Video Streaming Dataset for Streams Metadata and Online Viewers Locations</td>
+	<td>2020</td>
+	<td>accepted in ICIoT 2020, February 2020&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Basyoni, L., Fetais, N., Erbad, A. and Mohamed, A.</td>
+	<td>Traffic Analysis Attacks on Tor : A Survey</td>
+	<td>2020</td>
+	<td>accepted in ICIoT 2020, February 2020&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>AlMarridi, A., Mohamed, A., Erbad, A., Al-Ali, A. and Guizani, M.</td>
+	<td>Efficient EEG Mobile Edge Computing and Optimal Resource Allocation for Smart Health Applications</td>
+	<td>2019</td>
+	<td>published in 15th International Wireless Communications &amp; Mobile Computing Conference (IWCMC), Tangier, Morocco June 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Baccour, E., Erbad, A. and Mohamed, A.</td>
+	<td>CE-D2D: Dual Framework Chunks Caching and offloading in Collaborative Edge networks with D2D communication</td>
+	<td>2019</td>
+	<td>published in 15th International Wireless Communications &amp; Mobile Computing Conference (IWCMC), Tangier, Morocco June 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Al-Emadi, S.A., Al-Ali, A. and Al-Ali, A.</td>
+	<td>Audio Based Drone Detection and Identification using Deep Learning</td>
+	<td>2019</td>
+	<td>published in 15th International Wireless Communications &amp; Mobile Computing Conference (IWCMC), Tangier, Morocco June 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Samara, L., Mohamed, A., Erbad, A., Al-Ali, A. and Guizani, M.</td>
+	<td>Reliability-Secrecy Tradeoff for Implantable Medical Devices</td>
+	<td>2019</td>
+	<td>published in IEEE World Telecommunications Symposium (WTS), New York, USA, April 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Baccour, E., Erbad, A., Mohamed, A. and Bilal, K.</td>
+	<td>Proactive Video Chunks Caching and Processing for Latency and Cost Minimization in Edge Networks</td>
+	<td>2019</td>
+	<td>published in IEEE Wireless Communications and Networking Conference (WCNC), April 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Emam, A., Awad, A., Mohamed, A. and Harras, K.</td>
+	<td>EdgeHealth: An Energy-Efficient Edge-based Remote mHealth Monitoring System</td>
+	<td>2019</td>
+	<td>published in IEEE Wireless Communications and Networking Conference (WCNC), Marrakesh, Morocco, April 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Haouari, F., Baccour, E., Erbad, A. and Mohamed, A.</td>
+	<td>Transcoding Resources Forecasting and Reservation for Crowdsourced Live Streaming</td>
+	<td>2019</td>
+	<td>published in IEEE Global Communications Conference, Hawaii, USA, December, 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Haouari, F., Baccour, E., Erbad, A. and Mohamed, A.</td>
+	<td>QoE-Aware Resource Allocation for Crowdsourced Live Streaming: A Machine Learning Approach</td>
+	<td>2019</td>
+	<td>published in IEEE International Conference on Communications (ICC 2019), Shanghai, May 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Samara, L., Mohamed, A., Al-Ali, A., Erbad, A. and Guizani, M.</td>
+	<td>Compress or Interfere?</td>
+	<td>2019</td>
+	<td>accepted in IEEE SECON 2019: workshop on Edge Computing for Cyber Physical Systems (CyberEdge 2019), June 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>ElDiwany, B.E., Abdellatif, A.A., Mohamed, A., Al-Ali, A., Guizani, M. and Du, X.</td>
+	<td>On Physical Layer Security in Energy-Efficient Wireless Health Monitoring Applications</td>
+	<td>2019</td>
+	<td>published in IEEE ICC Shanghai, China, May 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Rathore, H., Samant, A., Jadliwala, M. and Mohamed, A.</td>
+	<td>TangleCV: Decentralized Technique for Secure Message Sharing in Connected Vehicles</td>
+	<td>2019</td>
+	<td>In Proceedings of the ACM Workshop on Automotive Cybersecurity, pp. 45-48, March 2019&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Mohamed, A. and Chiasserini, C.</td>
+	<td>Automated Class-based Compression for Real-Time Epileptic Seizure Detection</td>
+	<td>2018</td>
+	<td>published in Wireless Telecommunications Symposium (WTS), Arizona, USA, April, 2018 (Best paper award)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Rathore, H., Al-Ali, A., Mohamed, A., Du, X. and Guizani, M.</td>
+	<td>DTW based Authentication for Wireless Medical Device Security</td>
+	<td>2018</td>
+	<td>in IEEE IWCMC, Cypress, June, 2018&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Said, A.B., Mohamed, A., Elfouly, T., Abualsaud, K., Harras, K. and Guizani, M.</td>
+	<td>Deep learning and low rank dictionary model for mHealth data classification</td>
+	<td>2018</td>
+	<td>in IEEE IWCMC, Cypress, June, 2018&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>AlMarridi, A., Mohamed, A. and Erbad, A.</td>
+	<td>Convolutional Autoencoder Approach for EEG Compression and Reconstruction in m-Health Systems</td>
+	<td>2018</td>
+	<td>in IEEE IWCMC, Cypress, June, 2018&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Abualsaud, K., Mohamed, A., Khattab, T., Yaacoub, E., Guizani, M. and Hasna, M.</td>
+	<td>Classification for Imperfect EEG Epileptic Seizure in IoT applications: A Comparative Study</td>
+	<td>2018</td>
+	<td>in IEEE IWCMC, Cypress, June, 2018&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Rathore, H., Mohamed, A. and Guizani, M.</td>
+	<td>Mathematical Evaluation of Human Immune Systems For Securing Software Defined Networks</td>
+	<td>2018</td>
+	<td>published in 6th International Conference on Wireless Networks and Mobile Communications (WINCOM), Marrakesh, October 2018&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Belkhouja, T., Mohamed, A., Al-Ali, A.K. and Du, X.</td>
+	<td>Hashing Scheme based on ECG readings for Emergency Access to IMDs</td>
+	<td>2018</td>
+	<td>published in IEEE International Symposium on Networks, Computers and Communications (ISNCC), Rome, June 2018&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Belkhouja, T., Mohamed, A., Al-Ali, A.K. and Du, X.</td>
+	<td>Light-Weight Solution to Defend Implantable Medical Devices Against Man-In-The-Middle Attack</td>
+	<td>2018</td>
+	<td>published in IEEE Globecom 2018, Abu Dabhi, Dec 2018&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Emam, A., Mtibaa, A., Harras, K.A. and Mohamed, A.</td>
+	<td>Adaptive Forwarding of mHealth Data in Challenged Networks</td>
+	<td>2017</td>
+	<td>published in IEEE Healthcom, October 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Belkhouja, T., Du, X., Mohamed, A. and Guizani, A.K.A.-A.M.</td>
+	<td>Taha Belkhouja, Xiaojiang Du, Amr Mohamed, Abdulla K. Al-Ali and Mohsen Guizani, "New Plain-Text Authentication Secure Scheme for Implantable Medical Devices with Remote Control,</td>
+	<td>2017</td>
+	<td>IEEE Globecom 2017, Singapore, Dec. 4-8, 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Su, Y., Huang, L., Du, X., Mohamed, A. and Guizani, H.C.M.</td>
+	<td>Yuhan Su, Lianfen Huang, Xiaojiang Du, Amr Mohamed, Haotian Chi and Mohsen Guizani, "Q-Learning-based LTE-U and WiFi Coexistence Algorithm for Wireless Healthcare Systems,</td>
+	<td>2017</td>
+	<td>5th International Conference on Control Engineering &amp;Information Technology (CEIT-2017), Sousse, Tunisia, Dec. 17-19, 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Wu, L., Du, X., Guizani, M. and Mohamed, A.</td>
+	<td>A Review of Access Control Schemes for Implantable Medical Devices</td>
+	<td>2017</td>
+	<td>in Proc. of the 5th International Conference on Control &amp; Signal Processing (CSP) 2017, Tunisia, October 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Rathore, H., Al-Ali, A., Mohamed, A., Du, X. and Guizani, M.</td>
+	<td>DLRT: Deep Learning Approach for Reliable Diabetic Treatment</td>
+	<td>2017</td>
+	<td>in IEEE Globecom, Singapore, December, 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Belkhouja, T., Du, X., Mohamed, A. and Guizani, A.K.A.-A.M.</td>
+	<td>New Plain-Text Authentication Secure Scheme for Implantable Medical Devices with Remote Controls</td>
+	<td>2017</td>
+	<td>accepted in IEEE Globecom, Singapore, December, 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Belkhouja, T., Mohamed, A., Al-Ali, A.K., Du, X. and Guizani, M.</td>
+	<td>Light-Weight Encryption of Wireless Communication for Implantable Medical Devices Using Henon Chaotic System</td>
+	<td>2017</td>
+	<td>accepted in The International Conference on Wireless Networks and Mobile Communications (WINCOM'17), Rabat, Morocco, November 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Rathore, H., Mohamed, A., Al-Ali, A., Du, X. and Guizani, M.</td>
+	<td>A Review of Security Challenges, Attacks and Resolutions for Wireless Medical Devices</td>
+	<td>2017</td>
+	<td>in proceedings of 13th International Conference of Wireless Communications and Mobile Computing (IWCMC), Valencia, Spain 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Abdellatif, A.A., Mohamed, A. and Chiasserini, C.-F.</td>
+	<td>Concurrent Association in Heterogeneous Networks with Underlay D2D Communication</td>
+	<td>2017</td>
+	<td>in proceedings of 13th International Conference of Wireless Communications and Mobile Computing (IWCMC), Valencia, Spain 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Emam, A., Mtibaa, A., Harras, K.A. and Mohamed, A.</td>
+	<td>On The Shortcoming Of DTN Solutions in Rural mHealth Applications</td>
+	<td>2017</td>
+	<td>in proceedings of 13th International Conference of Wireless Communications and Mobile Computing (IWCMC), Valencia, Spain 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Said, A.B., Mohamed, A. and Elfouly, T.</td>
+	<td>Deep learning approach for EEG compression in mHealth system</td>
+	<td>2017</td>
+	<td>in proceedings of 13th International Conference of Wireless Communications and Mobile Computing (IWCMC), Valencia, Spain 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Saeed, A., Abdelkader, A., Khan, M., Neishaboori, A., Harras, K.A. and Mohamed, A.</td>
+	<td>Argus: Realistic Target Coverage by Drones</td>
+	<td>2017</td>
+	<td>accepted in The 16th ACM/IEEE International Conference on Information Processing in Sensor Networks (IPSN), Pittsburgh, Pennsylvania, USA, April 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Mohamed, A., Chiasserini, C.-F. and Elfouly, T.</td>
+	<td>Network Association With Dynamic Pricing Over D2D-Enabled Heterogeneous Networks</td>
+	<td>2017</td>
+	<td>accepted in IEEE Wireless Communication and Networking Conference (WCNC), San Francisco, March, 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Said, A.B., Mohamed, A., Elfouly, T., Harras, K. and Wang, Z.J.</td>
+	<td>Multimodal deep learning approach for joint EEG-EMG data compression and classification</td>
+	<td>2017</td>
+	<td>accepted in IEEE Wireless Communication and Networking Conference (WCNC), San Francisco, March, 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Badawy, A., Khattab, T., Trinchero, D., ElFouly, T. and Mohamed, A.</td>
+	<td>A Simple Angle of Arrival Estimation System</td>
+	<td>2017</td>
+	<td>accepted in IEEE Wireless Communication and Networking Conference (WCNC), San Francisco, March, 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Shabara, Y., Mohamed, A. and Al-Ali, A.K.</td>
+	<td>A hardware Implementation for Efficient Spectrum Access in Cognitive Radio Networks</td>
+	<td>2017</td>
+	<td>accepted in IEEE Wireless Communication and Networking Conference (WCNC), San Francisco, March, 2017&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hassan, H.K., Mohamed, A. and Alali, A.</td>
+	<td>DSA-based Energy Efficient Cellular Networks: Integration with The Smart Grid</td>
+	<td>2016</td>
+	<td>in proceedings of IEEE VTC Fall 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ghorbel, M.B., Guizani, M., Mohamed, A. and Hamdaoui, B.</td>
+	<td>Optimal Energy Exchange Scheme for Energy Efficient Hybrid-Powered Communication Systems</td>
+	<td>2016</td>
+	<td>accepted in IEEE Globecom December 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Saad, A., Mohamed, A., Chiasserini, C.-F. and Jaoua, A.</td>
+	<td>In-Network Data Reduction Approach Based on Smart Sensing</td>
+	<td>2016</td>
+	<td>accepted in IEEE Globecom December 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A., Shaban, K.B. and Mohamed, A.</td>
+	<td>Directed Graph-based Wireless EEG Sensor Channel Selection Approach for Cognitive Task Classification</td>
+	<td>2016</td>
+	<td>in proceedings of International Wireless Communications and Mobile Computing Conference (IWCMC), Cyprus, September 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Mohamed, A. and Chiasserini, C.-F.</td>
+	<td>User-centric Network Selection in Multi-RAT Systems</td>
+	<td>2016</td>
+	<td>in proceedings of IEEE Wireless Communications and Networking Conference Workshops (WCNC), Doha, Qatar April 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Samy, I., Butt, M.M. and Mohamed, A.</td>
+	<td>Energy efficient antenna selection for a MIMO relay using RF energy harvesting</td>
+	<td>2016</td>
+	<td>in proceedings of IEEE Wireless Communications and Networking Conference Workshops (WCNC), Doha, Qatar April 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Salama, A., Alali, A. and Mohamed, A.</td>
+	<td>An Evolutionary Game Theoretic Approach for Cooperative Spectrum Sensing</td>
+	<td>2016</td>
+	<td>in proceedings of IEEE Wireless Communications and Networking Conference Workshops (WCNC), Doha, Qatar April 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Khan, M., Alam, S., Heurtefeux, K. and Harras, K.A.</td>
+	<td>Drone-Be-Gone: Agile Low-Cost Easy-to-Deploy Vision-based UAV Testbed</td>
+	<td>2016</td>
+	<td>in Proceedings of the 2016 International Conference on Autonomous Agents &amp; Multiagent Systems (AAMAS), 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Khan, M., Alam, S., Heurtefeux, K. and Harras, K.A.</td>
+	<td>Simulating Drone-be-Gone: Agile Low-Cost Cyber-Physical UAV Testbed</td>
+	<td>2016</td>
+	<td>in proceedings of Autonomous Robots and Multirobot Systems (ARMS) 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ahmed, S., Mohamed, A. and Harras, K.</td>
+	<td>Energy Efficient Path Planning Techniques for UAV-based Systems with Space Discretization</td>
+	<td>2016</td>
+	<td>in proceedings of IEEE Wireless Communications and Networking Conference Workshops (WCNC), Doha, Qatar April 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Butt, M.M. and Guizani, A.M.M.</td>
+	<td>On the Effect of Proportional Fairness in Energy Transfer for Wireless Powered Communication Networks</td>
+	<td>2015</td>
+	<td>in Proc. International Wireless Communications and Mobile Computing Conference (IWCMC), Dubrovnik, Croatia, Aug., 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A. and Elfouly, A.M.T.</td>
+	<td>Energy-Cost-Distortion Optimization for Delay-Sensitive M-Health Applications,</td>
+	<td>2015</td>
+	<td>Wireless Telecommunications Symposium (WTS), April 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Elsayed, M.H.M. and Mohamed, A.</td>
+	<td>Encoding Distortion Modeling For DWT-Based Wireless EEG Monitoring System,</td>
+	<td>2016</td>
+	<td>IEEE Annual Consumer Communications &amp; Networking Conference (CCNC), January 2016&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Badawy, A., Khattab, T., Elfouly, T.M., Chiasserini, C.-F., Mohamed, A. and Trinchero, D.</td>
+	<td>Secret key generation based on AoA estimation for low snr conditions</td>
+	<td>2015</td>
+	<td>in 2015 IEEE 81st Vehicular Technology Conference (VTC spring 2015), Glasgow, Scotland, May 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Saad, A., Mohamed, A., Elfouly, T., Khattab, T. and Guizani, M.</td>
+	<td>Comparative Simulation for Physical Layer Key Generation methods</td>
+	<td>2015</td>
+	<td>in proceedings of the IWCMC Security Symposium, August 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Khalil, M.A., Khattab, T., Mohamed, A. and Elfouly, T.</td>
+	<td>Secrecy for MIMO Wiretap and MIMO Broadcast Channels with fading Eavesdroppers: CSI does not increase the Secure DoF</td>
+	<td>2015</td>
+	<td>in proceedings of the IEEE Pacific Rim Conference on Communications, Computers and Signal Processing (PACRIM), September, 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Badawy, A., Khattab, T., Elfouly, T.M., Chiasserini, C.-F., Mohamed, A. and Trinchero, D.</td>
+	<td>Channel secondary random process for robust secret key generation</td>
+	<td>2015</td>
+	<td>in IWCMC 2015 Security Symposium (IWCMC 2015 Security Symposium), Dubrovnik, Croatia, August 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Salman, T., Badawy, A., Elfouly, T.M., Mohamed, A. and Khattab, T.</td>
+	<td>Estimating the number of sources: An efficient maximization approach</td>
+	<td>2015</td>
+	<td>in IWCMC 2015 Comm &amp; Signal Processing Symposium (IWCMC 2015-Comm &amp; Signal Processing), Dubrovnik, Croatia, August 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Elsayed, M. and Mohamed, A.</td>
+	<td>Distributed interference management using Q-Learning in cognitive femtocell networks: New USRP-based implementation</td>
+	<td>2015</td>
+	<td>in New Technologies, Mobility and Security (NTMS), 2015 7th International Conference on , vol., no., pp.1-5, July 2015. (Best paper award)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hamdy, M., Mohamed, A. and El-Sherif, A.</td>
+	<td>DDSAT: Distributed Dynamic Spectrum Access protocol Implementation Using GNURadio andUSRP,</td>
+	<td>2014</td>
+	<td>SDR-WInnComm, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Hamdy, M., Mohamed, A. and Alnuweiri, H.</td>
+	<td>Real-time implementation and evaluation of an adaptive energy-aware data compression for wireless EEG monitoring systems</td>
+	<td>2014</td>
+	<td>in Heterogeneous Networking for Quality, Reliability, Security and Robustness (QShine), 2014 10th International Conference on , vol, no, pp 108-114, Aug 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Hamdy, M. and Mohamed, A.</td>
+	<td>Transmission Delay Minimization for Energy Constrained Communication in Wireless Body Area Sensor Networks</td>
+	<td>2014</td>
+	<td>in New Technologies, Mobility and Security (NTMS), 2014 6th International Conference on , vol, no, pp 1-5, March 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Saeed, A., Abdelkader, A., Neishaboori, A. and Harras, K.</td>
+	<td>The Inapproximability of Illuminating Polygons by alpha-floodlights</td>
+	<td>2015</td>
+	<td>in the 27th Canadian Conference on Computational Geometry August, 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hussein, R., Mohamed, A. and Alghoniemy, M.</td>
+	<td>Energy-Efficient On-Board Processing Technique for Wireless Epileptic Seizure Detection Systems</td>
+	<td>2015</td>
+	<td>accepted in the international conference on Computing, Networking and Communications, IEEE ICNC February 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Arar, A., El-Sherif, A., Mohamed, A. and Leung, V.C.</td>
+	<td>Optimum Power and Rate Allocation in Cluster Based Video Sensor Networks</td>
+	<td>2015</td>
+	<td>accepted in the international conference on Computing, Networking and Communications, IEEE ICNC February 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Shafie, A.E., Ashour, M., Khattab, T. and Mohamed, A.</td>
+	<td>On Spectrum Sharing Between Energy Harvesting Cognitive Radio Users and Primary Users</td>
+	<td>2015</td>
+	<td>accepted in the international conference on Computing, Networking and Communications, IEEE ICNC February 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Shafie, A.E., Khattab, T., Saad, H. and Mohamed, A.</td>
+	<td>Optimal Cooperative Cognitive Relaying and Spectrum Access for an Energy Harvesting Cognitive Radio: Reinforcement Learning Approach</td>
+	<td>2015</td>
+	<td>accepted in the international conference on Computing, Networking and Communications, IEEE ICNC February 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Shafie, A.E., Ashour, M., Khattab, T. and Mohamed, A.</td>
+	<td>Optimal Spectrum Access for a Rechargeable Cognitive Radio User Based on Energy Buffer State</td>
+	<td>2015</td>
+	<td>accepted in the international conference on Computing, Networking and Communications, IEEE ICNC February 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ashour, M., Shafie, A.E., Mohamed, A. and Khattab, T.</td>
+	<td>Power-Optimal Feedback-Based Random Spectrum Access for an Energy Harvesting Cognitive User</td>
+	<td>2015</td>
+	<td>accepted in the international conference on Computing, Networking and Communications, IEEE ICNC February 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Anwar, A., Shafie, A.E., Mohamed, A., ElBatt, T. and Guizani, M.</td>
+	<td>Interference-Based Optimal Power-Efficient Access Scheme for Cognitive Radio Networks</td>
+	<td>2015</td>
+	<td>accepted in the international conference on Computing, Networking and Communications, IEEE ICNC February 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Lateef, H.Y., Chiasserini, C.F., EIbatt, T., Mohamed, A. and Guizani, M.</td>
+	<td>Towards Energy Efficient Relay Placement and Load Balancing in Future Wireless Networks</td>
+	<td>2014</td>
+	<td>Accepted in IEEE Personal Indoor and Mobile Radio Communications (IEEE PIMRC 2014), Washington DC, USA, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Butt, M.M., Nasir, A., Mohamed, A. and Guizani, M.</td>
+	<td>Trading wireless Information and Power Transfer: Relay Selection Schemes to minimize the Outage Probability</td>
+	<td>2014</td>
+	<td>accepted in IEEE Global Conference on Signal and Information Processing (GlobalSIP), 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Neishaboori, A., Saeed, A., Harras, K.A. and Mohamed, A.</td>
+	<td>On target coverage in mobile visual sensor networks</td>
+	<td>2014</td>
+	<td>In Proceedings of the 12th ACM international symposium on Mobility management and wireless access, pages 39–46. ACM, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Saeed, A., Neishaboori, A., Mohamed, A. and Harras, K.A.</td>
+	<td>Up and away: A visually-controlled easy-to-deploy wireless UAV cyber-physical testbed</td>
+	<td>2014</td>
+	<td>In Wireless and Mobile Computing, Networking and Communications (WiMob), 2014 IEEE 10th International Conference on, pages 578–584. IEEE, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Neishaboori, A., Saeed, A., Harras, K. and Mohamed, A.</td>
+	<td>Low complexity target coverage heuristics using mobile cameras</td>
+	<td>2014</td>
+	<td>In Mobile Ad Hoc and Sensor Systems (MASS), EEE 11th International Conference on, pages 217–221. IEEE, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Neishaboori, A., Saeed, A., Harras, K. and Mohamed, A.</td>
+	<td>Heuristics to optimal target coverage using mobile cameras</td>
+	<td>2014</td>
+	<td>International Workshop on Robotic Sensor Networks, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ahmed, I., Butt, M.M. and Mohamed, A.</td>
+	<td>Energy Efficient Mobile Relay Selection for Two-Hop Wireless Networks</td>
+	<td>2014</td>
+	<td>in Proc. IEEE International Conference on Computer Systems and Applications, Doha, Qatar, November 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Butt, M.M., Anwar, A.H., Mohamed, A. and ElBatt, T.</td>
+	<td>Effective Capacity of Cognitive Radio Links: Accessing Primary Feedback Erroneously</td>
+	<td>2014</td>
+	<td>in Proc. 11th International Symposium on Wireless Communication Systems (ISWCS), Barcelona, Spain, August, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Badawy, A., Khattab, T., ElFouly, T., Mohamed, A. and Trinchero, D.</td>
+	<td>Secret key generation based on channel and distance measurements,</td>
+	<td>2014</td>
+	<td>in Ultra Modern Telecommunications and Control Systems and Workshops (ICUMT), 2014 6th International Congress on, pp. 136–142, Oct 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Salman, T., Badawy, A., Elfouly, T., Khattab, T. and Mohamed, A.</td>
+	<td>Non-data-aided SNR estimation for qpsk modulation in awgn channel,</td>
+	<td>2014</td>
+	<td>in Wireless and Mobile Computing, Networking and Communications (WiMob), 2014 IEEE 10th International Conference on, pp. 611–616, Oct 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Butt, M.M., Jorswieck, E.A. and Mohamed, A.</td>
+	<td>Energy Efficient Scheduling: Statistical Guarantees on Successive Packet Loss</td>
+	<td>2014</td>
+	<td>in Proc. International Workshop on Physics-inspired paradigms in wireless communications and networks (Physcomnet) in conjunction with WIOPT, Hammamet, Tunisia, May, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ashour, M., Butt, M.M. and Mohamed, A.</td>
+	<td>On the Power Efficiency for Cognitive Radio Networks with Multiple Relays</td>
+	<td>2014</td>
+	<td>IEEE International Symposium on Information Theory (ISIT), pp. 1401-1405, June, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Anwar, A., Shafie, A.E., Mohamed, A., ElBatt, T. and Guizani, M.</td>
+	<td>Interference-Based Optimal Power-Efficient Access Scheme for Cognitive Radio Networks</td>
+	<td>2015</td>
+	<td>accepted in IEEE International Conference on Computing, Networking and Communications (ICNC), February, 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ashour, M., El-Sherif, A., ElBatt, T. and Mohamed, A.</td>
+	<td>Cooperative Access in Cognitive Radio Networks: Stable Throughput and Delay Tradeoffs</td>
+	<td>2014</td>
+	<td>IEEE 12th International Symposium on Modeling and Optimization in Mobile, Ad Hoc, and Wireless Networks (WiOpt), pp. 263-270 May, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ashour, M., Shafie, A.E., Mohamed, A. and Khattab, T.</td>
+	<td>Power-Optimal Feedback-Based Random Spectrum Access for an Energy Harvesting Cognitive User</td>
+	<td>2015</td>
+	<td>accepted in IEEE International Conference on Computing, Networking and Communications (ICNC), February, 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Shafie, A.E., Ashour, M., Khattab, T. and Mohamed, A.</td>
+	<td>On Spectrum Sharing Between Energy Harvesting Cognitive Radio Users and Primary Users</td>
+	<td>2015</td>
+	<td>accepted in IEEE International Conference on Computing, Networking and Communications (ICNC), February, 2015&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Hamdy, M. and Mohamed, A.</td>
+	<td>Real-time Implementation and Evaluation of an Adaptive Energy-aware Data Compression for Wireless EEG Monitoring Systems</td>
+	<td>2014</td>
+	<td>QShine, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A. and Mohamed, A.</td>
+	<td>Distributed Cross-Layer Optimization for Healthcare Monitoring Applications</td>
+	<td>2014</td>
+	<td>IEEE WIOPT workshop on resource allocation in wireless networks, May 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Hamdy, M. and Mohamed, A.</td>
+	<td>Transmission Delay Minimization for Energy Constrained Communication in Wireless Body Area Sensor Networks</td>
+	<td>2014</td>
+	<td>NTMS, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hamdy, M., Mohamed, A. and El-Sherif, A.A.</td>
+	<td>DDSAT: Distributed Dynamic Spectrum Access protocol Implementation Using GNURadio and USRP</td>
+	<td>2014</td>
+	<td>SDR-WInnComm, 2014&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Elsherif, A., Mohamed, A. and Leung, V.C.M.</td>
+	<td>Optimum Power and Rate Allocation in Video Sensor Networks</td>
+	<td>2013</td>
+	<td>published in Globecom, Atlanta, Georgia, USA, December, 2013&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A., Shaban, K.B. and Mohamed, A.</td>
+	<td>Bayesian Network Based Heuristic for Energy Aware EEG Signal Classification</td>
+	<td>2013</td>
+	<td>in proceedings of the Brain and Health Informatics conference, Maebashi, Gunma, Japan, October, 2013&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Hussein, R., Mohamed, A. and El-Sherif, A.A.</td>
+	<td>Energy-Aware Cross-Layer Optimization for EEG-based Wireless Monitoring Applications</td>
+	<td>2013</td>
+	<td>Accepted in IEEE Conference on Local Computer Networks (LCN), October 2013&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Awad, A., Mohamed, A. and El-Sherif, A.A.</td>
+	<td>Energy Efficient Cross-Layer Design for Wireless Body Area Monitoring Networks in Healthcare Applications</td>
+	<td>2013</td>
+	<td>Proceedings in IEEE International Symposium on Personal, Indoor and Mobile Radio Communications Conference (PIMRC), September 2013&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Saad, H., Mohamed, A. and ElBatt, T.A.</td>
+	<td>A Cooperative Q-learning Approach for Real-time Power Allocation in Femtocell Networks</td>
+	<td>2013</td>
+	<td>accepted in VTC Fall, September, 2013&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hussein, R., Mohamed, A. and Al-Ghoniemy, M.</td>
+	<td>Design and analysis of an adaptive compressive sensing architecture for epileptic seizure detection</td>
+	<td>2013</td>
+	<td>International Conference on Energy Aware Computing systems &amp; applications (ICEAC 2013)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hussein, R., Mohamed, A. and Al-Ghoniemy, M.</td>
+	<td>Adaptive Compression and optimization for real-time energy-efficient wireless EEG monitoring system</td>
+	<td>2013</td>
+	<td>Biomedical Engineering International Conference (BMEiCON2013)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hussein, R., Awad, A., Mohamed, A., El-Sherif, A. and Al-Ghoniemy, M.</td>
+	<td>Adaptive Energy-Aware encoding for DWT-based wireless EEG Tele-monitoring System</td>
+	<td>2013</td>
+	<td>Digital Signal Processing/ Signal Processing Education workshop (DSP/SPE 2013)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Romdhani, L. and Mohamed, A.</td>
+	<td>An analytic study of a distributed EDCA-based QoS mapping for layered video delivery in WLAN</td>
+	<td>2012</td>
+	<td>published in the First International Workshop on Performance Evaluation and Modeling in Wireless Networks PEMWN 2012&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A., Shaban, K.B. and Mohamed, A.</td>
+	<td>Effective Seizure Detection through the Fusion of Single-Feature Enhanced-k-NN Classifiers of EEG Signals</td>
+	<td>2013</td>
+	<td>The 4th IEEE Biosignals and Biorobotics conference (ISSNIP), Rio de Janeiro, Brazil, February 18-20, 2013&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A., Shaban, K. and Mohamed, A.</td>
+	<td>Evidence Theory-based Approach for Epileptic Seizure Detection</td>
+	<td>2012</td>
+	<td>The Third Workshop on Biological Data Mining and its Applications in Healthcare (BioDM), in the Proceedings of the 12th IEEE International Conference on Data Mining Workshops (IEEE ICDMW 2012), Brussels, Belgium, pages 79 - 85, December 10, 2012&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hussein, R., Mohamed, A., Shaban, K.B. and Mohamed, A.</td>
+	<td>EEG Feature Extraction and Selection Techniques for Epileptic Detection: A Comparative Study</td>
+	<td>2013</td>
+	<td>IEEE Symposium on Computer and Informatics (ISCI 2013), 7 - 9 April, 2013&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hamza, F.A., Romdhani, L. and Mohamed, A.</td>
+	<td>Novel Network Coding-based Techniques for Multi-layer Video Delivery over Multi-hop Wireless testbed</td>
+	<td>2012</td>
+	<td>published in The First International Workshop on Performance Evaluation and Modeling in Wireless Networks PEMWN 2012&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Elsherif, A. and Mohamed, A.</td>
+	<td>Delay Minimization through Joint Routing and Resource Allocation in Cognitive Radio-Based Mesh Networks</td>
+	<td>2012</td>
+	<td>in proceedings of IEEE Globecom, DOI: 10.1109/GLOCOM.2012.6503146, pages: 403 - 409, Anahiem, 3-7 December, 2012&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Saad, H., Mohamed, A. and ElBatt, T.</td>
+	<td>Distributed cooperative q-learning for power allocation in cognitive femtocell networks</td>
+	<td>2012</td>
+	<td>in: Vehicular Technology Conference (VTC Fall), 2012 IEEE&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Romdhani, L., Mohamed, A., Raeisi, S. and Elfouly, T.M.</td>
+	<td>QUMESH: Wireless mesh network deployment and configuration in harsh environment</td>
+	<td>2012</td>
+	<td>In 2012 IEEE Wireless Communications and Networking Conference (WCNC), April 2012&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Gandhi, R., Yang, M., Koutsonikolas, D., Hu, Y., Comer, M., Mohamed, A. and Wang, C.</td>
+	<td>The impact of inter-layer network coding on the relative performance of MRC/MDC WiFi media delivery</td>
+	<td>2011</td>
+	<td>in Proc. NOSSDAV, pp.27-32, 2011&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Koutsonikolas, D., Hu1, Y.C., Comer, M., Mohamed, A. and Wang, C.</td>
+	<td>Efficient Online WiFi Delivery of Layered-Coding Media using Inter-layer Network Coding</td>
+	<td>2011</td>
+	<td>in: 31st International Conference on Distributed Computing Systems, pp. 237-247, 2011&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ahmed, I., Aljahdali, S., Hundewale, N. and Shah, A.M.S.I.</td>
+	<td>Performance Analysis for Truncated ARQ based DSFBC-CO-OFDM Communication Scheme</td>
+	<td>2011</td>
+	<td>accepted in 24th International Conference on Computer Applications in Industry and Engineering (CAINE), November 2011&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>El-Sherif, A.A., Mohamed, A. and Hu, Y.C.</td>
+	<td>Joint Routing and Resource Allocation for Delay Sensitive Traffic in Cognitive Mesh Networks</td>
+	<td>2011</td>
+	<td>accepted in IEEE Globecom International Workshop on Recent Advances in Cognitive Communications and Networking, November, 2011&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ahmed, I., Mohamed, A., ElFouly, T. and Hu, Y.C.</td>
+	<td>On the Fairness of Frequency Domain Resource Allocation in Wireless Mesh Networks- A Survey</td>
+	<td>2011</td>
+	<td>in Proc. of IEEE GCC Conference, Dubai, 19-22, February 2011&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ahmed, I., Orfali, S., Khattab, T. and Mohamed, A.</td>
+	<td>Characterization of the Indoor-Outdoor Radio Propagation Channel at 2.4 GHz</td>
+	<td>2011</td>
+	<td>in Proc. of IEEE GCC Conference, Dubai, 605 - 608, February 2011&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ahmed, I. and Mohamed, A.</td>
+	<td>Outage Optimal Resource Allocation for Two-hop Multiuser Multirelay Cooperative Communication in OFDMA Upstream</td>
+	<td>2011</td>
+	<td>accepted for publication in IEEE VTC Spring, Budapest, Hungry, 2011&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Hajipour, J., Mohamed, A. and Leung, V.C.</td>
+	<td>Channel Aware and Queue Aware Scheduling in LTE Uplink</td>
+	<td>2010</td>
+	<td>in Proceedings of 7th International ICST Conference on Heterogeneous Networking for Quality, Reliability, Security and Robustness (ICST Qshine), Houston, Texas, USA, November, 2010&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ruby, R., Mohamed, A. and Leung, V.</td>
+	<td>Utility-Based Uplink Scheduling Algorithm for Enhancing Throughput and Fairness in Relayed LTE Networks</td>
+	<td>2010</td>
+	<td>In proceedings of the 35th Annual IEEE Conference on Local Computer Networks and Workshops, LCN 2010&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Ahmed, I., Mohamed, A. and Shakeel, I.</td>
+	<td>On the Group Proportional Fairness of Frequency Domain Resource Allocation in L-SC-FDMA based LTE uplink</td>
+	<td>2010</td>
+	<td>Published in IEEE Globecom Workshop on Broadband Single Carrier and Frequency Domain Communications, 2010&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Wireless Multicast Cross-Layer Framework for Rate Allocation: Protocol Design</td>
+	<td>2008</td>
+	<td>International Conference and Exhibition on Next Generation Mobile Applications, Services, and Technologies - NGMAST, workshop on future multimedia networking (FMN), Cardif, Wales, GB, September 2008&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A., Elfouly, T., Ibrahim, S., al-Kuwari, F., al-Qahtani, F. and al-Sulati, E.</td>
+	<td>WPSS: Wireless Patient Surveillance System using Zigbee standards</td>
+	<td>2008</td>
+	<td>poster published in 1st International Conference on "M4D": Mobile communication technology For Development, December, 2008&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Pourmohammadi, Y., Haghighi, K.A., Mohamed, A. and Alnuweiri, H.M.</td>
+	<td>Streaming MPEG-4 over IP and Broadcast Networks: DMIF Based Architectures</td>
+	<td>2001</td>
+	<td>Packet Video 2001 workshop&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.M.</td>
+	<td>Mpeg4 Broadcast: A Client/Server Framework For Multi-Service Streaming Using Push Channels</td>
+	<td>2001</td>
+	<td>MMSP 2001 workshop&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A., Kaheel, A. and Khattab, T.</td>
+	<td>Evaluation of Optical Packet Switch as Edge Device Using OPNET Modeler</td>
+	<td>2002</td>
+	<td>Published in Opnetwork IEEE conference in Washington, US, September 2002&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Khattab, T., Mohamed, A. and Alnuweiri, A.K.H.</td>
+	<td>Optical Packet Switching with Packet Aggregation</td>
+	<td>2002</td>
+	<td>Published in IEEE SOFTCOM 2002&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Dynamic programming QoS-based classification for links with limited service levels</td>
+	<td>2005</td>
+	<td>In proceedings of IEEE Conference on local area networks LCN, Sydney, Australia, pages 51–58, November 2005&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Optimal QoS-based classification for link models with predetermined service levels</td>
+	<td>2005</td>
+	<td>In proceedings of the 8th International Conference on Telecommunications, Contel, Zagreb, Croatia, 2:375– 382, June 2005&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Stochastic QoS-based classification for link models with calculated service levels</td>
+	<td>2005</td>
+	<td>In proceedings of Conference on Communications, Computers and signal Processing, PACRIM, pages 364–367, August 2005&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>QoS-based partitioning and resource allocation for link models with variable service levels</td>
+	<td>2006</td>
+	<td>In proceedings of IEEE ISCC, Sardinia, Italy, June 2006&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>A distributed iterative algorithm for optimal rate allocation for homogeneous wireless multicast</td>
+	<td>2006</td>
+	<td>In proceedings of IST mobile &amp; wireless communications summit, Greece, June 2006&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Optimal resource allocation for homogeneous wireless multicast</td>
+	<td>2006</td>
+	<td>In Proceeings of IEEE Globecom, San Francisco, November 2006&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Design of a cross-layer optimization framework for rate allocation in wireless multicast</td>
+	<td>2006</td>
+	<td>In Proceedings IEEE International conference on Mobile Ad-hoc and Sensor Systems (MASS), Vancouver, Canada, October 2006&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Utility-based Optimal Rate Allocation for Heterogeneous Wireless Multicast</td>
+	<td>2007</td>
+	<td>In Proceedings of IEEE ICC, June 2007&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>Cross-layer Framework for Rate Allocation in Heterogeneous Wireless Multicast</td>
+	<td>2006</td>
+	<td>In Proceedings of IIT, Dubai, UAE, October 2006&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A. and Alnuweiri, H.</td>
+	<td>A Distributed Iterative Algorithm for Optimal Rate Allocation for Homogeneous Wireless Multicast</td>
+	<td>2006</td>
+	<td>In Proceedings of ICENCO, Cairo, Egypt, November 2006&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Alhalees, R., Dalgamouni, A., Orfali, S., Salam, S., Elfouly, T. and Mohamed, A.</td>
+	<td>Scalable indoor framework for patient and medical staff tracking using RFID-based system</td>
+	<td>2011</td>
+	<td>Accepted in the third annual undergraduate research conference on applied computing, Dubai, May 2011&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Qaffaf, S., Al-Kuwari, R., Al-Amoudi, O., Aloraidi, N., Al-Marri, H.D.M. and Elfouly, T.</td>
+	<td>, Assistive Technology for People with Hearing/Speaking Disabilities</td>
+	<td>2011</td>
+	<td>Accepted in the third annual undergraduate research conference on applied computing, Dubai, May 2011 (best poster)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="" class="entry">
+	<td>Conference</td>
+	<td>Mohamed, A., Boularas, A., Bendeddouche, R. and Al-Damarawy, M.</td>
+	<td>WIPMON: Wireless Sensor System for Industrial Process Monitoring</td>
+	<td>2010</td>
+	<td>second annual undergraduate research conference on applied computing, Dubai, May 2010. (Best paper award) http://www.zu.ac.ae/urc/program.html&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="hussein2013adaptive" class="entry">
+	<td>arXiv Publication</td>
+	<td>Hussein, R. and Mohamed, A.</td>
+	<td>Adaptive Energy-aware Encoding for DWT-Based Wireless EEG Monitoring System</td>
+	<td>2013</td>
+	<td>arXiv preprint arXiv:1304.0133Digital Signal Processing/ Signal Processing Education workshop (DSP/SPE 2013)&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="romdhani2013analytic" class="entry">
+	<td>arXiv Publication</td>
+	<td>Romdhani, L. and Mohamed, A.</td>
+	<td>An analytic study of a distributed EDCA-based QoS mapping for layered video delivery in WLAN</td>
+	<td>2013</td>
+	<td>arXiv preprint arXiv:1304.4472&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="hamza2013novel" class="entry">
+	<td>arXiv Publication</td>
+	<td>Hamza, F.A., Romdhani, L. and Mohamed, A.</td>
+	<td>Novel Network Coding-based Techniques for Multi-layer Video Delivery over Multi-hop Wireless testbed</td>
+	<td>2013</td>
+	<td>arXiv preprint arXiv:1304.7578&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="badawy2014simple" class="entry">
+	<td>arXiv Publication</td>
+	<td>Badawy, A., Khattab, T., Trinchero, D., Fouly, T.E. and Mohamed, A.</td>
+	<td>A simple aoa estimation scheme</td>
+	<td>2014</td>
+	<td>arXiv preprint arXiv:1409.5744&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="saeed2017realistic" class="entry">
+	<td>arXiv Publication</td>
+	<td>Saeed, A., Abdelkader, A., Khan, M., Neishaboori, A., Harras, K.A. and Mohamed, A.</td>
+	<td>On Realistic Target Coverage by Autonomous Drones</td>
+	<td>2017</td>
+	<td>arXiv preprint arXiv:1702.03456&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="al2018survey" class="entry">
+	<td>arXiv Publication</td>
+	<td>Al-Garadi, M.A., Mohamed, A., Al-Ali, A., Du, X. and Guizani, M.</td>
+	<td>A survey of machine and deep learning methods for internet of things (IoT) security</td>
+	<td>2018</td>
+	<td>arXiv preprint arXiv:1807.11023&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="shakeri2018design" class="entry">
+	<td>arXiv Publication</td>
+	<td>Shakeri, R., Al-Garadi, M.A., Badawy, A., Mohamed, A., Khattab, T., Al-Ali, A., Harras, K.A. and Guizani, M.</td>
+	<td>Design Challenges of Multi-UAV Systems in Cyber-Physical Applications: A Comprehensive Survey, and Future Directions</td>
+	<td>2018</td>
+	<td>arXiv preprint arXiv:1810.09729&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+<tr id="baccour2018proactive" class="entry">
+	<td>arXiv Publication</td>
+	<td>Baccour, E., Erbad, A., Mohamed, A., Bilal, K. and Guizani, M.</td>
+	<td>Proactive Video Chunks Caching and Processing for Latency and Cost Minimization in Edge Networks</td>
+	<td>2018</td>
+	<td>arXiv preprint arXiv:1812.06501&nbsp;</td>
+	<td>&nbsp;</td>
+</tr>
+</tbody>
+</table>
+<footer>
+ <small>Created by <a href="http://jabref.sourceforge.net">JabRef</a> on 26/12/2020.</small>
+</footer>
+
+<!-- file generated by JabRef -->
+
+</body>
+</html>
