@@ -225,7 +225,7 @@ function loadTableData() {
 		if (allRows[i].className.match(/entry/)) {
 			entryRows[j] = allRows[i];
 			entryRowsData[j] = stripDiacritics(getTextContent(allRows[i]));
-			allRows[i].id ? BibTeXKeys[j] = allRows[i].id : allRows[i].id = 'autokey_'+j;
+			allRows[i].id ? BibTeXKeys[j] = allRows[i].id : BibTeXKeys[j] = 'autokey_'+j;
 			if(initphase == false) {
 				var Cells = entryRows[j].getElementsByTagName("td");
 				if(Cells[0].innerText.indexOf('Journal')>-1) {
