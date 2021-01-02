@@ -24,9 +24,9 @@
 //
 
 // Search settings
-var noSquiggles = true; 	// ignore diacritics when searching
+var noSquiggles = false; 	// ignore diacritics when searching
 var searchRegExp = false; 	// enable RegExp searches
-
+var initphase = false;  //set to true after the initialization phase
 var color = Chart.helpers.color;
 var barChartData = {
 	labels: [],
@@ -64,9 +64,24 @@ if (window.addEventListener) {
 else if (window.attachEvent) {
 	window.attachEvent("onload", initSearch); }
 
+
 function initSearch() {
 	// check for quick search table and searchfield
 	if (!document.getElementById('qs_table')||!document.getElementById('quicksearch')) { return; }
+	
+//	var aux1 = document.querySelectorAll(".publications th");
+//	console.log("Number of elements with querySelectorAll = " + aux1.length);
+
+	document.querySelectorAll(".publications th").forEach(headerCell => {
+		headerCell.addEventListener("click", () => {
+			const tableElement = headerCell.parentElement.parentElement.parentElement;
+			const headerIndex = Array.prototype.indexOf.call(headerCell.parentElement.children, headerCell);
+			const currentIsAscending = headerCell.classList.contains("th-sort-asc");
+
+			sortTableByColumn(tableElement, headerIndex, !currentIsAscending);
+		});
+	});
+
 
 	//initialize chart
 	var ctx = document.getElementById('canvas').getContext('2d');
@@ -141,6 +156,41 @@ function addChartData(type, year) {
 		
 }
 
+/**
+ * Sorts a HTML table.
+ * 
+ * @param {HTMLTableElement} table The table to sort
+ * @param {number} column The index of the column to sort
+ * @param {boolean} asc Determines if the sorting will be in ascending
+ */
+function sortTableByColumn(table, column, asc = true) {
+    const dirModifier = asc ? 1 : -1;
+    const tBody = table.tBodies[0];
+    const rows = Array.from(tBody.querySelectorAll("tr"));
+
+    // Sort each row
+    const sortedRows = rows.sort((a, b) => {
+        const aColText = a.querySelector(`td:nth-child(${ column + 1 })`).textContent.trim();
+        const bColText = b.querySelector(`td:nth-child(${ column + 1 })`).textContent.trim();
+
+        return aColText > bColText ? (1 * dirModifier) : (-1 * dirModifier);
+    });
+
+    // Remove all existing TRs from the table
+    while (tBody.firstChild) {
+        tBody.removeChild(tBody.firstChild);
+    }
+
+    // Re-add the newly sorted rows
+    tBody.append(...sortedRows);
+
+    // Remember how the column is currently sorted
+    table.querySelectorAll("th").forEach(th => th.classList.remove("th-sort-asc", "th-sort-desc"));
+    table.querySelector(`th:nth-child(${ column + 1})`).classList.toggle("th-sort-asc", asc);
+    table.querySelector(`th:nth-child(${ column + 1})`).classList.toggle("th-sort-desc", !asc);
+}
+
+
 function loadTableData() {
 	// find table and appropriate rows
 	searchTable = document.getElementById('qs_table');
@@ -159,56 +209,59 @@ function loadTableData() {
 			entryRows[j] = allRows[i];
 			entryRowsData[j] = stripDiacritics(getTextContent(allRows[i]));
 			allRows[i].id ? BibTeXKeys[j] = allRows[i].id : allRows[i].id = 'autokey_'+j;
-			var Cells = entryRows[j].getElementsByTagName("td");
-			if(Cells[0].innerText.indexOf('Journal')>-1) {
-				entryRows[j].style.backgroundColor = "#CBF7B4";
-				journals++;
-				addChartData('Journal', Cells[3].innerText);
-			} 
-			else if(Cells[0].innerText.indexOf('Thesis')>-1) {
-				entryRows[j].style.backgroundColor = "#33FFC9";			
-				theses++;
-				addChartData('Other', Cells[3].innerText);								
+			if(initphase == false) {
+				var Cells = entryRows[j].getElementsByTagName("td");
+				if(Cells[0].innerText.indexOf('Journal')>-1) {
+					entryRows[j].style.backgroundColor = "#CBF7B4";
+					journals++;
+					addChartData('Journal', Cells[3].innerText);
+				} 
+				else if(Cells[0].innerText.indexOf('Thesis')>-1) {
+					entryRows[j].style.backgroundColor = "#33FFC9";			
+					theses++;
+					addChartData('Other', Cells[3].innerText);								
+				}
+				else if(Cells[0].innerText.indexOf('Book')>-1) {
+					entryRows[j].style.backgroundColor = "#C0F8E9";			
+					books++;
+					addChartData('Other', Cells[3].innerText);												
+				}
+				else if(Cells[0].innerText.indexOf('Patent')>-1) {
+					entryRows[j].style.backgroundColor = "#E8D0E0";				
+					patents++;
+					addChartData('Other', Cells[3].innerText);												
+				}
+				else if(Cells[0].innerText.indexOf('Conference')>-1) {
+					entryRows[j].style.backgroundColor = "#DDD0E8";				
+					conferences++;
+					addChartData('Conference', Cells[3].innerText);				
+				}
+				Cells[0].innerText = j + 1 + ': ' + Cells[0].innerText;
+				j ++;
 			}
-			else if(Cells[0].innerText.indexOf('Book')>-1) {
-				entryRows[j].style.backgroundColor = "#C0F8E9";			
-				books++;
-				addChartData('Other', Cells[3].innerText);												
-			}
-			else if(Cells[0].innerText.indexOf('Patent')>-1) {
-				entryRows[j].style.backgroundColor = "#E8D0E0";				
-				patents++;
-				addChartData('Other', Cells[3].innerText);												
-			}
-			else if(Cells[0].innerText.indexOf('Conference')>-1) {
-				entryRows[j].style.backgroundColor = "#DDD0E8";				
-				conferences++;
-				addChartData('Conference', Cells[3].innerText);				
-			}
-			Cells[0].innerText = j + 1 + ': ' + Cells[0].innerText;
-			j ++;
 		}
 	}
-
-	totalsTable = document.getElementById('totals_table');
-	var totalsRows = totalsTable.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-	if (totalsRows[1].className.match(/total/)) {
-		var Cells;
-		Cells = totalsRows[1].getElementsByTagName("td");
-		Cells[0].innerText= theses;
-		Cells[0].style.backgroundColor = "#33FFC9";
-		Cells[1].innerText= books;
-		Cells[1].style.backgroundColor = "#C0F8E9";
-		Cells[2].innerText= journals;
-		Cells[2].style.backgroundColor = "#CBF7B4";
-		Cells[3].innerText= patents;
-		Cells[3].style.backgroundColor = "#E8D0E0";
-		Cells[4].innerText= conferences;
-		Cells[4].style.backgroundColor = "#DDD0E8";
-		Cells[5].innerText= j;
-		//Cells[0].style.backgroundColor =
+	if (initphase == false) {
+		totalsTable = document.getElementById('totals_table');
+		var totalsRows = totalsTable.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+		if (totalsRows[1].className.match(/total/)) {
+			var Cells;
+			Cells = totalsRows[1].getElementsByTagName("td");
+			Cells[0].innerText= theses;
+			Cells[0].style.backgroundColor = "#33FFC9";
+			Cells[1].innerText= books;
+			Cells[1].style.backgroundColor = "#C0F8E9";
+			Cells[2].innerText= journals;
+			Cells[2].style.backgroundColor = "#CBF7B4";
+			Cells[3].innerText= patents;
+			Cells[3].style.backgroundColor = "#E8D0E0";
+			Cells[4].innerText= conferences;
+			Cells[4].style.backgroundColor = "#DDD0E8";
+			Cells[5].innerText= j;
+			//Cells[0].style.backgroundColor =
+		}
+		initphase = true;
 	}
-	
 	//number of entries and rows
 	numEntries = entryRows.length;
 }
@@ -392,6 +445,30 @@ function toggleSettings(){
 </script>
 <style type="text/css">
 body { background-color: white; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.2; padding: 1em; color: #2E2E2E; margin: auto 2em; }
+
+table.publications th {
+  cursor: pointer;
+}
+
+table.publications .th-sort-asc::after {
+  content: "\25b4";
+}
+
+table.publications .th-sort-desc::after {
+  content: "\25be";
+}
+
+table.publications .th-sort-asc::after,
+table.publications .th-sort-desc::after {
+  margin-left: 5px;
+}
+
+table.publications .th-sort-asc,
+table.publications .th-sort-desc {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+
 
 form#quicksearch { width: auto; border-style: solid; border-color: gray; border-width: 1px 0px; padding: 0.7em 0.5em; display:none; position:relative; }
 span#searchstat {padding-left: 1em;}
